@@ -28,6 +28,9 @@ target_link_libraries("${PROJECT_NAME}"
     wx::core
 	libzopflipng
 )
+target_include_directories(${PROJECT_NAME} PUBLIC
+	"taskflow/taskflow"
+)
 
 # mac app
 set_target_properties("${PROJECT_NAME}" PROPERTIES 

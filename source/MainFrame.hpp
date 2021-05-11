@@ -5,10 +5,18 @@
 #include <filesystem>
 #include <vector>
 #include <cstdint>
+#include <taskflow.hpp>
+
+enum class Status {
+	NotStarted,
+	InProgress,
+	Success,
+	Failed
+};
 
 struct FileInfo {
 	std::filesystem::path path;
-	bool complete = false;
+	Status status = Status::NotStarted;
 };
 
 class MainFrame : public MainFrameBase {
@@ -30,6 +38,11 @@ private:
 
 	void DoFile(decltype(currentID) id);
 	bool DoPNG(const FileInfo&, std::vector<uint8_t>&);
+
+	bool MoveToRecycleBin(const std::filesystem::path& path);
+
+	tf::Executor executor;
+	tf::Taskflow alltasks;
 
 	std::vector<uint8_t> LoadPNG(const std::filesystem::path& path);
 };

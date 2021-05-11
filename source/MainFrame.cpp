@@ -71,33 +71,55 @@ void MainFrame::OnRemoveImages(wxCommandEvent&)
 
 void MainFrame::OnCompressAll(wxCommandEvent&)
 {
+	alltasks.clear();
+	isRunning = true;
 	// compress all
 	for (const auto& entry : currentFiles) {
-		DoFile(entry.first);
+		auto id = entry.first;
+		alltasks.emplace([this,id]() { DoFile(id); });
 	}
+	executor.run(alltasks);	//don't block here
 }
 
 void MainFrame::DoFile(decltype(currentID) id)
 {
+	if (!isRunning) {
+		return;
+	}
 	//get file object at ID
 	auto& file = currentFiles.at(id);
+	file.status = Status::InProgress;
 
 	vector<uint8_t> result;
-	if (file.path.extension() == ".png") {
-		DoPNG(file, result);
+	try {
+		
+		if (file.path.extension() == ".png") {
+			DoPNG(file, result);
+		}
+	}
+	catch (runtime_error& e) {
+		file.status = Status::Failed;
 	}
 
-	file.complete = true;
+
+	file.status = Status::Success;
+
+	if (!isRunning) {
+		return;
+	}
 
 	// if id is still in the dictionary
 	if (currentFiles.find(id) != currentFiles.end()) {
 		// move old file to trash
-
-		// write new compressed file 
-		std::ofstream out(file.path);
-		//std::copy(result.rbegin(), result.rend(), std::ostream_iterator<int>(out));
+		if (MoveToRecycleBin(file.path)) {
+			// write new compressed file 
+			std::ofstream out(file.path);
+			std::copy(result.rbegin(), result.rend(), std::ostream_iterator<int>(out));
+		}
+		else {
+			throw runtime_error("trash failed");
+		}
 	}
-	
 }
 
 bool MainFrame::DoPNG(const FileInfo& file, vector<uint8_t>& result)
@@ -128,4 +150,29 @@ bool MainFrame::DoPNG(const FileInfo& file, vector<uint8_t>& result)
 	}
 
 	return true;
+}
+
+bool MainFrame::MoveToRecycleBin(const std::filesystem::path& path)
+{
+#ifdef _WIN32
+	SHFILEOPSTRUCT shfos;
+	memset(&shfos, 0, sizeof(shfos));
+	
+	//double null-terminated
+	auto wpath = path.wstring();
+
+	auto pathptr = wpath.c_str();
+
+	shfos.wFunc = FO_DELETE;
+	shfos.pFrom = pathptr;
+
+	shfos.fFlags = FOF_ALLOWUNDO | FOF_SILENT | FOF_NOCONFIRMATION;
+
+	auto result = SHFileOperation(&shfos);
+
+	return !result;
+#else
+#error This platform is not supported
+#endif
+
 }
