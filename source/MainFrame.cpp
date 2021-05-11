@@ -171,6 +171,8 @@ bool MainFrame::MoveToRecycleBin(const std::filesystem::path& path)
 	auto result = SHFileOperation(&shfos);
 
 	return !result;
+#elif defined __APPLE__
+	
 #else
 #error This platform is not supported
 #endif
