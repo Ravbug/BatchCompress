@@ -3,17 +3,17 @@
 #include <wx/wx.h>
 #endif
 
-//#include "interface_derived.h"
+#include "MainFrame.hpp"
 
 class BatchCompress : public wxApp
 {
 public:
     virtual bool OnInit() {
-       /* frame = new MainFrame();
-        frame->Show(true);*/
+        
+        frame = new MainFrame();
+        frame->Show(true);
         return true;
     }
-    virtual int FilterEvent(wxEvent&);
-    //MainFrame* frame;
+    MainFrame* frame;
 };
 wxIMPLEMENT_APP(BatchCompress);

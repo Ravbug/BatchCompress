@@ -11,18 +11,22 @@ file(GLOB source "source/*.cpp" "source/*.hpp" "source/*.h")
 if(APPLE)
     set(macfiles "source/wxmac.icns" CACHE INERNAL "")
 elseif(WIN32)
-	set(winfiles "windows.rc" CACHE INTERNAL "")
+	set(winfiles "source/windows.rc" CACHE INTERNAL "")
 endif()
 add_executable("${PROJECT_NAME}" WIN32 ${source} ${macfiles} ${winfiles})
+
 
 #wxwidgets
 set(wxBUILD_SHARED OFF CACHE INTERNAL "")
 add_subdirectory("wxWidgets")
 
+add_subdirectory("zopfli")
+
 target_link_libraries("${PROJECT_NAME}"
     PUBLIC 
     wx::base
     wx::core
+	libzopflipng
 )
 
 # mac app
