@@ -3,12 +3,17 @@
 #include <zopflipng_lib.h>
 #include <fstream>
 
+#define DISPATCH_EVT 5000
+
+wxDEFINE_EVENT(dispatchEvt, wxCommandEvent);
+
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
 EVT_MENU(wxID_EXIT, MainFrame::OnExit)
 EVT_MENU(wxID_OPEN, MainFrame::OnAddImages)
 EVT_MENU(wxID_CLEAR, MainFrame::OnClear)
 EVT_MENU(wxID_DELETE, MainFrame::OnRemoveImages)
 EVT_MENU(wxID_EXECUTE, MainFrame::OnCompressAll)
+EVT_COMMAND(DISPATCH_EVT, dispatchEvt, MainFrame::OnDispatchUIUpdateMainThread)
 wxEND_EVENT_TABLE()
 
 using namespace std;
@@ -41,6 +46,7 @@ void MainFrame::OnAddImages(wxCommandEvent&)
 	for (const auto& file : filenames) {
 		wxVector<wxVariant> items(dataViewList->GetColumnCount());
 		items[0] = file;
+		items[5] = StatusToStr(Status::NotStarted);
 		currentFiles.emplace(std::make_pair(currentID, FileInfo{ std::filesystem::path(openFileDialog.GetDirectory().ToStdString()) / std::filesystem::path(file.ToStdString()) }));
 		dataViewList->AppendItem(items,currentID);
 		currentID++;
@@ -74,11 +80,21 @@ void MainFrame::OnCompressAll(wxCommandEvent&)
 	alltasks.clear();
 	isRunning = true;
 	// compress all
-	for (const auto& entry : currentFiles) {
-		auto id = entry.first;
-		alltasks.emplace([this,id]() { DoFile(id); });
+	for (auto& entry : currentFiles) {
+		if (entry.second.status == Status::NotStarted || entry.second.status == Status::Failed) {
+			auto id = entry.first;
+			entry.second.status = Status::Queued;
+			alltasks.emplace([this, id]() { DoFile(id); });
+		}
 	}
 	executor.run(alltasks);	//don't block here
+}
+
+void MainFrame::OnDispatchUIUpdateMainThread(wxCommandEvent& evt)
+{
+	//update the UI
+	const auto& fileid = currentFiles.at(evt.GetInt());
+
 }
 
 void MainFrame::DoFile(decltype(currentID) id)
@@ -89,6 +105,12 @@ void MainFrame::DoFile(decltype(currentID) id)
 	//get file object at ID
 	auto& file = currentFiles.at(id);
 	file.status = Status::InProgress;
+
+	//dispatch to notify that processing has begun
+	wxCommandEvent event(dispatchEvt);
+	event.SetId(DISPATCH_EVT);
+	event.SetInt(id);
+	wxPostEvent(this, event);
 
 	vector<uint8_t> result;
 	try {
@@ -101,10 +123,8 @@ void MainFrame::DoFile(decltype(currentID) id)
 		file.status = Status::Failed;
 	}
 
-
-	file.status = Status::Success;
-
 	if (!isRunning) {
+		wxPostEvent(this, event);
 		return;
 	}
 
@@ -113,12 +133,16 @@ void MainFrame::DoFile(decltype(currentID) id)
 		// move old file to trash
 		if (MoveToRecycleBin(file.path)) {
 			// write new compressed file 
+			file.status = Status::Success;
 			std::ofstream out(file.path);
 			std::copy(result.rbegin(), result.rend(), std::ostream_iterator<int>(out));
 		}
 		else {
-			throw runtime_error("trash failed");
+			file.status = Status::Failed;
 		}
+		//dispatch to main thread for update
+		//notify that processing has completed
+		wxPostEvent(this, event);
 	}
 }
 
@@ -158,23 +182,35 @@ bool MainFrame::MoveToRecycleBin(const std::filesystem::path& path)
 	SHFILEOPSTRUCT shfos;
 	memset(&shfos, 0, sizeof(shfos));
 	
-	//double null-terminated
-	auto wpath = path.wstring();
-
-	auto pathptr = wpath.c_str();
+	auto wpath = path.wstring() + "\0\0";
 
 	shfos.wFunc = FO_DELETE;
-	shfos.pFrom = pathptr;
-
+	shfos.pFrom = wpath.wchar_str();
 	shfos.fFlags = FOF_ALLOWUNDO | FOF_SILENT | FOF_NOCONFIRMATION;
 
 	auto result = SHFileOperation(&shfos);
-
 	return !result;
+
 #elif defined __APPLE__
 	
 #else
 #error This platform is not supported
 #endif
 
+}
+
+const char* MainFrame::StatusToStr(Status s)
+{
+	switch (s) {
+	case Status::Failed:
+		return "Failed";
+	case Status::InProgress:
+		return "In Progress";
+	case Status::NotStarted:
+		return "Not Started";
+	case Status::Queued:
+		return "Queued";
+	case Status::Success:
+		return "Complete";
+	}
 }

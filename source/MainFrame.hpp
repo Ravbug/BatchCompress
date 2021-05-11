@@ -9,6 +9,7 @@
 
 enum class Status {
 	NotStarted,
+	Queued,
 	InProgress,
 	Success,
 	Failed
@@ -28,6 +29,8 @@ public:
 	void OnClear(wxCommandEvent&);
 	void OnRemoveImages(wxCommandEvent&);
 	void OnCompressAll(wxCommandEvent&);
+	void OnDispatchUIUpdateMainThread(wxCommandEvent&);
+
 
 	DECLARE_EVENT_TABLE()
 private:
@@ -36,14 +39,16 @@ private:
 	bool isRunning = false;
 
 
-	void DoFile(decltype(currentID) id);
+	void DoFile(decltype(currentID));
 	bool DoPNG(const FileInfo&, std::vector<uint8_t>&);
 
-	bool MoveToRecycleBin(const std::filesystem::path& path);
+	bool MoveToRecycleBin(const std::filesystem::path&);
+
+	const char* StatusToStr(Status);
 
 	tf::Executor executor;
 	tf::Taskflow alltasks;
 
-	std::vector<uint8_t> LoadPNG(const std::filesystem::path& path);
+	std::vector<uint8_t> LoadPNG(const std::filesystem::path&);
 };
 
