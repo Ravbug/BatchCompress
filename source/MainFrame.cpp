@@ -5,6 +5,10 @@
 #include <array>
 #include <fmt/format.h>
 
+#ifdef __APPLE__
+#include "objc_bridge.h"
+#endif
+
 #define DISPATCH_EVT 5000
 
 wxDEFINE_EVENT(dispatchEvt, wxCommandEvent);
@@ -139,16 +143,25 @@ void MainFrame::OnDispatchUIUpdateMainThread(wxCommandEvent& evt)
 	dataViewList->SetTextValue(StatusToStr(fileid.status),row,5);
 
 	switch (fileid.status) {
-	case Status::InProgress:
-		fileid.orig_size = std::filesystem::file_size(fileid.path);
-		dataViewList->SetTextValue(sizeToString(fileid.orig_size), row, 2);
+		case Status::NotStarted:
+			break;
+		case Status::Queued:
+			break;
+		case Status::InProgress:
+			fileid.orig_size = std::filesystem::file_size(fileid.path);
+			dataViewList->SetTextValue(sizeToString(fileid.orig_size), row, 2);
+			break;
+		case Status::Success:
+			{
+//				auto newsize = std::filesystem::file_size(fileid.path);
+//				dataViewList->SetTextValue(sizeToString(newsize), row, 1);
+//				dataViewList->SetTextValue(fmt::format("{:d}%",1.0 - (static_cast<double>(newsize) / fileid.orig_size) * 100),row,3);
+			}
+			break;
+		case Status::Failed:
+			
 		break;
-	case Status::Success:
-		auto newsize = std::filesystem::file_size(fileid.path);
-		dataViewList->SetTextValue(sizeToString(newsize), row, 1);
-		dataViewList->SetTextValue(fmt::format("{:d}%",1.0 - (static_cast<double>(newsize) / fileid.orig_size) * 100),row,3);
-		break;
-	}
+		}
 }
 
 void MainFrame::OnPause(wxCommandEvent&)
@@ -251,9 +264,9 @@ bool MainFrame::MoveToRecycleBin(const std::filesystem::path& path)
 	return !result;
 
 #elif defined __APPLE__
-	
+	return trashItem(path);
 #else
-#error This platform is not supported
+#error This platform's trash is not supported -- implement this platform's trash API here
 #endif
 
 }

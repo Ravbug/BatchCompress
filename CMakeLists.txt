@@ -14,7 +14,7 @@ endif()
 
 file(GLOB source "source/*.cpp" "source/*.hpp" "source/*.h")
 if(APPLE)
-    set(macfiles "source/wxmac.icns" CACHE INERNAL "")
+    set(macfiles "source/wxmac.icns;source/objc_bridge.h;source/objc_bridge.mm" CACHE INERNAL "")
 elseif(WIN32)
 	set(winfiles "source/windows.rc" CACHE INTERNAL "")
 endif()
