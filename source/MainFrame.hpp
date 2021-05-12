@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <vector>
 #include <cstdint>
-#include <taskflow.hpp>
+#include "ThreadPool.h"
 
 enum class Status {
 	NotStarted,
@@ -18,6 +18,8 @@ enum class Status {
 struct FileInfo {
 	std::filesystem::path path;
 	Status status = Status::NotStarted;
+	wxDataViewItem dataViewItem;
+	std::uintmax_t orig_size;
 };
 
 class MainFrame : public MainFrameBase {
@@ -30,13 +32,13 @@ public:
 	void OnRemoveImages(wxCommandEvent&);
 	void OnCompressAll(wxCommandEvent&);
 	void OnDispatchUIUpdateMainThread(wxCommandEvent&);
-
+	void OnPause(wxCommandEvent&);
 
 	DECLARE_EVENT_TABLE()
 private:
 	uint64_t currentID = 0;
 	std::unordered_map<decltype(currentID),FileInfo> currentFiles;
-	bool isRunning = false;
+	bool isPaused = false;
 
 
 	void DoFile(decltype(currentID));
@@ -46,8 +48,7 @@ private:
 
 	const char* StatusToStr(Status);
 
-	tf::Executor executor;
-	tf::Taskflow alltasks;
+	ThreadPool threadpool;
 
 	std::vector<uint8_t> LoadPNG(const std::filesystem::path&);
 };

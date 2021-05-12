@@ -2,6 +2,8 @@
 #include <wx/filedlg.h>
 #include <zopflipng_lib.h>
 #include <fstream>
+#include <array>
+#include <fmt/format.h>
 
 #define DISPATCH_EVT 5000
 
@@ -13,17 +15,55 @@ EVT_MENU(wxID_OPEN, MainFrame::OnAddImages)
 EVT_MENU(wxID_CLEAR, MainFrame::OnClear)
 EVT_MENU(wxID_DELETE, MainFrame::OnRemoveImages)
 EVT_MENU(wxID_EXECUTE, MainFrame::OnCompressAll)
+EVT_MENU(wxID_STOP, MainFrame::OnPause)
 EVT_COMMAND(DISPATCH_EVT, dispatchEvt, MainFrame::OnDispatchUIUpdateMainThread)
 wxEND_EVENT_TABLE()
 
 using namespace std;
+
+static string sizeToString(const std::uintmax_t fileSize) {
+	string formatted = "";
+	int size = 1000;		//MB = 1000, MiB = 1024
+	array<string, 5> suffix{ " bytes", " KB", " MB", " GB", " TB" };
+	auto max = suffix.size();
+
+	for (int i = 0; i < max; i++)
+	{
+		double compare = pow(size, i);
+		if (fileSize <= compare || i == max - 1)
+		{
+			int minus = 0;
+			if (i > 0)
+			{
+				minus = 1;
+			}
+
+			if (fileSize > compare) {
+				minus = 0;
+			}
+
+			//round to 2 decimal places (except for bytes), then attach unit
+			char buffer[10];
+			const string format = (i - minus == 0) ? "%.0f" : "%.2f";
+			sprintf(buffer, format.c_str(), fileSize / pow(size, i - minus));
+			formatted = string(buffer) + suffix[i - minus];
+			break;
+		}
+	}
+
+	if (formatted == "") {
+		return "??";
+	}
+	return formatted;
+}
+
 
 void MainFrame::OnExit(wxCommandEvent&)
 {
 	Close(true);
 }
 
-MainFrame::MainFrame() : MainFrameBase(nullptr)
+MainFrame::MainFrame() : MainFrameBase(nullptr), threadpool(std::thread::hardware_concurrency())
 {
 #ifdef _WIN32
 	//name is the same as the one used in the resource file definition
@@ -47,8 +87,10 @@ void MainFrame::OnAddImages(wxCommandEvent&)
 		wxVector<wxVariant> items(dataViewList->GetColumnCount());
 		items[0] = file;
 		items[5] = StatusToStr(Status::NotStarted);
-		currentFiles.emplace(std::make_pair(currentID, FileInfo{ std::filesystem::path(openFileDialog.GetDirectory().ToStdString()) / std::filesystem::path(file.ToStdString()) }));
+		FileInfo entry{ std::filesystem::path(openFileDialog.GetDirectory().ToStdString()) / std::filesystem::path(file.ToStdString()) };
+		currentFiles.emplace(std::make_pair(currentID, entry));
 		dataViewList->AppendItem(items,currentID);
+		currentFiles.at(currentID).dataViewItem = dataViewList->RowToItem(dataViewList->GetItemCount()-1);
 		currentID++;
 	}
 
@@ -77,29 +119,53 @@ void MainFrame::OnRemoveImages(wxCommandEvent&)
 
 void MainFrame::OnCompressAll(wxCommandEvent&)
 {
-	alltasks.clear();
-	isRunning = true;
+	isPaused = false;
 	// compress all
+
 	for (auto& entry : currentFiles) {
-		if (entry.second.status == Status::NotStarted || entry.second.status == Status::Failed) {
+		if (entry.second.status == Status::NotStarted) {
 			auto id = entry.first;
 			entry.second.status = Status::Queued;
-			alltasks.emplace([this, id]() { DoFile(id); });
+			threadpool.enqueue([this, id]() { DoFile(id); });
 		}
 	}
-	executor.run(alltasks);	//don't block here
 }
 
 void MainFrame::OnDispatchUIUpdateMainThread(wxCommandEvent& evt)
 {
 	//update the UI
-	const auto& fileid = currentFiles.at(evt.GetInt());
+	auto& fileid = currentFiles.at(evt.GetInt());
+	auto row = dataViewList->ItemToRow(fileid.dataViewItem);
+	dataViewList->SetTextValue(StatusToStr(fileid.status),row,5);
 
+	switch (fileid.status) {
+	case Status::InProgress:
+		fileid.orig_size = std::filesystem::file_size(fileid.path);
+		dataViewList->SetTextValue(sizeToString(fileid.orig_size), row, 2);
+		break;
+	case Status::Success:
+		auto newsize = std::filesystem::file_size(fileid.path);
+		dataViewList->SetTextValue(sizeToString(newsize), row, 1);
+		dataViewList->SetTextValue(fmt::format("{:d}%",1.0 - (static_cast<double>(newsize) / fileid.orig_size) * 100),row,3);
+		break;
+	}
+}
+
+void MainFrame::OnPause(wxCommandEvent&)
+{
+	isPaused = true;
+	threadpool.clear();
 }
 
 void MainFrame::DoFile(decltype(currentID) id)
 {
-	if (!isRunning) {
+	wxCommandEvent event(dispatchEvt);
+	event.SetId(DISPATCH_EVT);
+	event.SetInt(id);
+
+	if (isPaused) {
+		currentFiles.at(id).status = Status::NotStarted;
+		wxPostEvent(this, event);
 		return;
 	}
 	//get file object at ID
@@ -107,9 +173,6 @@ void MainFrame::DoFile(decltype(currentID) id)
 	file.status = Status::InProgress;
 
 	//dispatch to notify that processing has begun
-	wxCommandEvent event(dispatchEvt);
-	event.SetId(DISPATCH_EVT);
-	event.SetInt(id);
 	wxPostEvent(this, event);
 
 	vector<uint8_t> result;
@@ -123,10 +186,6 @@ void MainFrame::DoFile(decltype(currentID) id)
 		file.status = Status::Failed;
 	}
 
-	if (!isRunning) {
-		wxPostEvent(this, event);
-		return;
-	}
 
 	// if id is still in the dictionary
 	if (currentFiles.find(id) != currentFiles.end()) {
@@ -134,8 +193,8 @@ void MainFrame::DoFile(decltype(currentID) id)
 		if (MoveToRecycleBin(file.path)) {
 			// write new compressed file 
 			file.status = Status::Success;
-			std::ofstream out(file.path);
-			std::copy(result.rbegin(), result.rend(), std::ostream_iterator<int>(out));
+			//std::ofstream out(file.path);
+			//std::copy(result.rbegin(), result.rend(), std::ostream_iterator<int>(out));
 		}
 		else {
 			file.status = Status::Failed;

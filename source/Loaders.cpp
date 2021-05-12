@@ -84,7 +84,6 @@ vector<uint8_t> MainFrame::LoadPNG(const std::filesystem::path& path) {
         // detect truncated file
         if (p_read + chunk_length > fp_ + size_) {
             memmove(p_write, p_read, fp_ + size_ - p_read);
-            throw runtime_error("PNG file corrupted!");
             fp_ -= size_leanified;
             size_ -= p_read - p_write - size_leanified;
         }

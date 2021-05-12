@@ -42,11 +42,18 @@ MainFrameBase::MainFrameBase( wxWindow* parent, wxWindowID id, const wxString& t
 	delMenu = new wxMenuItem( fileMenu, wxID_DELETE, wxString( wxT("Remove Selected Images") ) , wxEmptyString, wxITEM_NORMAL );
 	fileMenu->Append( delMenu );
 
-	wxMenuItem* compressMenu;
-	compressMenu = new wxMenuItem( fileMenu, wxID_EXECUTE, wxString( wxT("Compress Listed Files") ) , wxEmptyString, wxITEM_NORMAL );
-	fileMenu->Append( compressMenu );
-
 	menuBat->Append( fileMenu, wxT("File") );
+
+	processMenu = new wxMenu();
+	wxMenuItem* compressMenu;
+	compressMenu = new wxMenuItem( processMenu, wxID_EXECUTE, wxString( wxT("Compress Listed Files") ) , wxEmptyString, wxITEM_NORMAL );
+	processMenu->Append( compressMenu );
+
+	wxMenuItem* pauseMenu;
+	pauseMenu = new wxMenuItem( processMenu, wxID_STOP, wxString( wxT("Pause") ) , wxEmptyString, wxITEM_NORMAL );
+	processMenu->Append( pauseMenu );
+
+	menuBat->Append( processMenu, wxT("Process") );
 
 	windowMenu = new wxMenu();
 	wxMenuItem* quitMenu;

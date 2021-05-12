@@ -45,6 +45,7 @@ class MainFrameBase : public wxFrame
 		wxDataViewColumn* statusCol;
 		wxMenuBar* menuBat;
 		wxMenu* fileMenu;
+		wxMenu* processMenu;
 		wxMenu* windowMenu;
 		wxStatusBar* statusBar;
 
