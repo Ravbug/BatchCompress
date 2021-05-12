@@ -153,9 +153,9 @@ void MainFrame::OnDispatchUIUpdateMainThread(wxCommandEvent& evt)
 			break;
 		case Status::Success:
 			{
-//				auto newsize = std::filesystem::file_size(fileid.path);
-//				dataViewList->SetTextValue(sizeToString(newsize), row, 1);
-//				dataViewList->SetTextValue(fmt::format("{:d}%",1.0 - (static_cast<double>(newsize) / fileid.orig_size) * 100),row,3);
+				auto newsize = std::filesystem::file_size(fileid.path);
+				dataViewList->SetTextValue(sizeToString(newsize), row, 1);
+				dataViewList->SetTextValue(fmt::format("{}%",static_cast<int>(100 - (static_cast<double>(newsize) / fileid.orig_size) * 100)),row,3);
 			}
 			break;
 		case Status::Failed:
@@ -197,6 +197,8 @@ void MainFrame::DoFile(decltype(currentID) id)
 	}
 	catch (runtime_error& e) {
 		file.status = Status::Failed;
+        wxPostEvent(this, event);
+        return;
 	}
 
 
@@ -206,8 +208,8 @@ void MainFrame::DoFile(decltype(currentID) id)
 		if (MoveToRecycleBin(file.path)) {
 			// write new compressed file 
 			file.status = Status::Success;
-			//std::ofstream out(file.path);
-			//std::copy(result.rbegin(), result.rend(), std::ostream_iterator<int>(out));
+			std::ofstream out(file.path, ios::out | ios::binary);
+            out.write((char*)result.data(), result.size() * sizeof(result[0]));
 		}
 		else {
 			file.status = Status::Failed;
@@ -227,7 +229,11 @@ bool MainFrame::DoPNG(const FileInfo& file, vector<uint8_t>& result)
 	zop_opt.lossy_transparent = false;
 	zop_opt.lossy_8bit = false;
 	zop_opt.num_iterations = zop_opt.num_iterations_large = 15;
+#ifndef NDEBUG
 	zop_opt.verbose = true;
+#else
+    zop_opt.verbose = false;
+#endif
 	zop_opt.keepchunks = { "acTL", "fcTL", "fdAT", "npTc" };
 
 	// open the file:
@@ -235,10 +241,14 @@ bool MainFrame::DoPNG(const FileInfo& file, vector<uint8_t>& result)
 
 	vector<uint8_t> resultpng;
 
-	if (!ZopfliPNGOptimize(origpng, zop_opt, true, &resultpng)) {
+	if (!ZopfliPNGOptimize(origpng, zop_opt, zop_opt.verbose, &resultpng)) {
 		if (resultpng.size() < origpng.size()) {
 			result = resultpng;
 		}
+        else{
+            //compression was not better than original, so use the original png
+            result = origpng;
+        }
 	}
 	else {
 		throw runtime_error("Zopfli failed");
