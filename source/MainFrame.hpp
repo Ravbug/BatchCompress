@@ -33,6 +33,7 @@ public:
 	void OnCompressAll(wxCommandEvent&);
 	void OnDispatchUIUpdateMainThread(wxCommandEvent&);
 	void OnPause(wxCommandEvent&);
+	void OnSelectionActivated(wxDataViewEvent&);
 
 	DECLARE_EVENT_TABLE()
 private:

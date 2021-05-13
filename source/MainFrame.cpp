@@ -21,6 +21,7 @@ EVT_MENU(wxID_DELETE, MainFrame::OnRemoveImages)
 EVT_MENU(wxID_EXECUTE, MainFrame::OnCompressAll)
 EVT_MENU(wxID_STOP, MainFrame::OnPause)
 EVT_COMMAND(DISPATCH_EVT, dispatchEvt, MainFrame::OnDispatchUIUpdateMainThread)
+EVT_DATAVIEW_ITEM_ACTIVATED(DATAVIEWLIST, MainFrame::OnSelectionActivated)
 wxEND_EVENT_TABLE()
 
 using namespace std;
@@ -168,6 +169,44 @@ void MainFrame::OnPause(wxCommandEvent&)
 {
 	isPaused = true;
 	threadpool.clear();
+}
+
+void MainFrame::OnSelectionActivated(wxDataViewEvent& e)
+{
+	auto& file = currentFiles[e.GetInt()];
+
+	//reveal the file in the platform's explorer
+
+#ifdef _WIN32
+	std::string str;
+	if (std::filesystem::is_directory(file.path)) {
+		str = file.path.string();
+	}
+	else {
+		str = file.path.parent_path().string();
+	}
+	wxExecute(wxT("C:\\Windows\\explorer.exe \"" + str + "\""), wxEXEC_ASYNC);
+#elif defined __APPLE__
+	std::string str;
+	if (is_directory(file.path)) {
+		str = file.path;
+	}
+	else {
+		str = file.path.parent_path().string();
+	}
+	wxExecute(wxT("open \"" + str + "\""), wxEXEC_ASYNC);
+#elif defined __linux__
+	std::string str;
+	if (std::filesystem::is_directory(file.path)) {
+		str = file.path.string();
+	}
+	else {
+		str = file.path.parent_path().string();
+	}
+	wxExecute(wxT("xdg-open \"" + str + "\""), wxEXEC_ASYNC);
+#else
+#error This platform's open-in-explorer is not supported. Implement its API here.'
+#endif
 }
 
 void MainFrame::DoFile(decltype(currentID) id)

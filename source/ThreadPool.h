@@ -29,6 +29,8 @@ public:
     auto enqueue(F&& f, Args&&... args)
         ->std::future<typename std::result_of<F(Args...)>::type>;
 
+    ~ThreadPool();
+
     void clear() {
         queue_mutex.lock();
         decltype(tasks) empty;
@@ -88,4 +90,11 @@ auto ThreadPool::enqueue(F&& f, Args&&... args)
     }
     condition.notify_one();
     return res;
+}
+
+inline ThreadPool::~ThreadPool() {
+    //release threads
+    for (auto& thread : workers) {
+        thread.detach();
+    }
 }
