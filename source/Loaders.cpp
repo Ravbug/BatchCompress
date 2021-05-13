@@ -57,7 +57,8 @@ vector<uint8_t> MainFrame::LoadPNG(const std::filesystem::path& path) {
     fseek(f, 0, SEEK_END);
     size_t size_ = ftell(f);
     fseek(f, 0, SEEK_SET);
-    auto fp_ = new uint8_t[size_];
+    std::vector<uint8_t> manage(size_);
+    auto fp_ = manage.data();
     fread(fp_, 1, size_, f);
     fclose(f);
 
@@ -144,8 +145,6 @@ vector<uint8_t> MainFrame::LoadPNG(const std::filesystem::path& path) {
     size_ = p_write - fp_;
 
     vector<uint8_t> png(fp_, fp_ + size_);
-
-    delete[] fp_;
 
     return png;
 }

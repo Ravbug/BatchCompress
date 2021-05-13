@@ -8,7 +8,7 @@
 class BatchCompress : public wxApp
 {
 public:
-    virtual bool OnInit() {
+    virtual bool OnInit() override{
         
         frame = new MainFrame();
         frame->Show(true);
