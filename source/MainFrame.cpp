@@ -10,6 +10,11 @@
 #include "objc_bridge.h"
 #endif
 
+#ifdef _WIN32
+#include <shobjidl_core.h>
+#define COM_SAFE_RELEASE(x) if (x != NULL) x->Release(); x = NULL
+#endif
+
 #define DISPATCH_EVT 5000
 
 wxDEFINE_EVENT(dispatchEvt, wxCommandEvent);
@@ -331,19 +336,50 @@ bool MainFrame::DoPNG(const FileInfo& file, vector<uint8_t>& result)
 bool MainFrame::MoveToRecycleBin(const std::filesystem::path& path)
 {
 #ifdef _WIN32
-	SHFILEOPSTRUCT shfos;
-	memset(&shfos, 0, sizeof(shfos));
+	// Initialize COM
 
-	auto pathstr = path.wstring();
-	pathstr += L"\0";
+	// Create COM instance of IFileOperation
+	IFileOperation* pfo = nullptr;
+	HRESULT hr = CoCreateInstance(CLSID_FileOperation, NULL, CLSCTX_ALL, IID_PPV_ARGS(&pfo));
+	if (SUCCEEDED(hr)) {
+		assert(pfo != nullptr);
 
-	shfos.wFunc = FO_DELETE;
-	shfos.pFrom = pathstr.c_str();
-	shfos.pTo = NULL;
-	shfos.fFlags = FOF_ALLOWUNDO | FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI;
+		// Set parameters for current operation
+		hr = pfo->SetOperationFlags(
+			FOF_SILENT |    // Don't display a progress dialog
+			FOF_NOERRORUI  |  // Don't display any error messages to the user
+			FOFX_RECYCLEONDELETE // send to the recycle bin
+		);
 
-	auto result = SHFileOperation(&shfos);
-	return !result;
+		if (SUCCEEDED(hr)) {
+			// Create IShellItem instance associated to file to delete
+			IShellItem* psiFileToDelete = nullptr;
+			hr = SHCreateItemFromParsingName(path.c_str(), NULL, IID_PPV_ARGS(&psiFileToDelete));
+			if (SUCCEEDED(hr)) {
+				assert(psiFileToDelete != nullptr);
+
+				// Declare this shell item (file) to be deleted
+				hr = pfo->DeleteItem(psiFileToDelete, NULL);
+			}
+
+			// Cleanup file-to-delete shell item
+			COM_SAFE_RELEASE(psiFileToDelete);
+
+			if (SUCCEEDED(hr)) {
+				// Perform the deleting operation
+				hr = pfo->PerformOperations();
+			}
+		}
+	}
+
+	// Cleanup file operation object
+	COM_SAFE_RELEASE(pfo);
+
+	if (!SUCCEEDED(hr)) {
+		return false;
+	}
+
+	return true;
 
 #elif defined __APPLE__
 	return trashItem(path);
