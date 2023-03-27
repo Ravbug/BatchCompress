@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////
-// C++ code generated with wxFormBuilder (version Oct 26 2018)
+// C++ code generated with wxFormBuilder (version 3.10.1-0-g8feb16b3)
 // http://www.wxformbuilder.org/
 //
 // PLEASE DO *NOT* EDIT THIS FILE!
@@ -33,6 +33,10 @@ MainFrameBase::MainFrameBase( wxWindow* parent, wxWindowID id, const wxString& t
 	wxMenuItem* addImagesMenu;
 	addImagesMenu = new wxMenuItem( fileMenu, wxID_OPEN, wxString( wxT("Add Images") ) + wxT('\t') + wxT("CTRL+O"), wxEmptyString, wxITEM_NORMAL );
 	fileMenu->Append( addImagesMenu );
+
+	wxMenuItem* addImagesFromFolderMenu;
+	addImagesFromFolderMenu = new wxMenuItem( fileMenu, ID_ADD_FROM_FOLDER, wxString( wxT("Add All In Folder") ) + wxT('\t') + wxT("CTRL+SHIFT+O"), wxEmptyString, wxITEM_NORMAL );
+	fileMenu->Append( addImagesFromFolderMenu );
 
 	wxMenuItem* clearMenu;
 	clearMenu = new wxMenuItem( fileMenu, wxID_CLEAR, wxString( wxT("Clear Image List") ) , wxEmptyString, wxITEM_NORMAL );

@@ -1,5 +1,5 @@
 ///////////////////////////////////////////////////////////////////////////
-// C++ code generated with wxFormBuilder (version Oct 26 2018)
+// C++ code generated with wxFormBuilder (version 3.10.1-0-g8feb16b3)
 // http://www.wxformbuilder.org/
 //
 // PLEASE DO *NOT* EDIT THIS FILE!
@@ -26,7 +26,8 @@
 ///////////////////////////////////////////////////////////////////////////
 
 #define DATAVIEWLIST 1000
-#define wxID_EXECUTE 1001
+#define ID_ADD_FROM_FOLDER 1001
+#define wxID_EXECUTE 1002
 
 ///////////////////////////////////////////////////////////////////////////////
 /// Class MainFrameBase

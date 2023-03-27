@@ -4,6 +4,7 @@
 #include <fstream>
 #include <array>
 #include <fmt/format.h>
+#include <wx/dirdlg.h>
 
 #ifdef __APPLE__
 #include "objc_bridge.h"
@@ -18,6 +19,7 @@ EVT_MENU(wxID_EXIT, MainFrame::OnExit)
 EVT_MENU(wxID_OPEN, MainFrame::OnAddImages)
 EVT_MENU(wxID_CLEAR, MainFrame::OnClear)
 EVT_MENU(wxID_DELETE, MainFrame::OnRemoveImages)
+EVT_MENU(ID_ADD_FROM_FOLDER, MainFrame::OnAddImagesFromFolder)
 EVT_MENU(wxID_EXECUTE, MainFrame::OnCompressAll)
 EVT_MENU(wxID_STOP, MainFrame::OnPause)
 EVT_COMMAND(DISPATCH_EVT, dispatchEvt, MainFrame::OnDispatchUIUpdateMainThread)
@@ -87,19 +89,48 @@ void MainFrame::OnAddImages(wxCommandEvent&)
 
 	wxArrayString filenames;
 	openFileDialog.GetFilenames(filenames);
+	std::filesystem::path rootDir(openFileDialog.GetDirectory().ToStdString());
+	for (auto& file : filenames) {
+		file = (rootDir / std::filesystem::path(file.ToStdString())).string();
+	}
 
+	AddImagesImpl(filenames);
+
+}
+
+void MainFrame::AddImagesImpl(const wxArrayString& filenames)
+{
 	for (const auto& file : filenames) {
 		wxVector<wxVariant> items(dataViewList->GetColumnCount());
 		items[0] = file;
 		items[5] = StatusToStr(Status::NotStarted);
-		FileInfo entry{ std::filesystem::path(openFileDialog.GetDirectory().ToStdString()) / std::filesystem::path(file.ToStdString()) };
+		FileInfo entry{ std::filesystem::path(file.ToStdString()) };
 		currentFiles.emplace(std::make_pair(currentID, entry));
-		dataViewList->AppendItem(items,currentID);
-		currentFiles.at(currentID).dataViewItem = dataViewList->RowToItem(dataViewList->GetItemCount()-1);
+		dataViewList->AppendItem(items, currentID);
+		currentFiles.at(currentID).dataViewItem = dataViewList->RowToItem(dataViewList->GetItemCount() - 1);
 		currentID++;
 	}
-
 	dataViewList->GetColumn(0)->SetWidth(wxCOL_WIDTH_AUTOSIZE);
+}
+
+void MainFrame::OnAddImagesFromFolder(wxCommandEvent&)
+{
+	wxDirDialog openFolderDialog{ this, "Choose root directory" };
+	if (openFolderDialog.ShowModal() == wxID_CANCEL) {
+		return;
+	}
+	const auto chosen_dir = std::filesystem::path{ openFolderDialog.GetPath().ToStdString() };
+
+	wxArrayString filenames;
+
+	for (const auto& file : std::filesystem::recursive_directory_iterator(chosen_dir)) {
+		auto ext = file.path().extension().string();
+		std::transform(ext.begin(), ext.end(), ext.begin(), [](const char c) {return std::tolower(c); });
+		if (ext == ".png") {
+			filenames.Add(file.path().string());
+		}
+	}
+	AddImagesImpl(filenames);
 }
 
 void MainFrame::OnClear(wxCommandEvent&)
@@ -302,12 +333,14 @@ bool MainFrame::MoveToRecycleBin(const std::filesystem::path& path)
 #ifdef _WIN32
 	SHFILEOPSTRUCT shfos;
 	memset(&shfos, 0, sizeof(shfos));
-	
-	auto wpath = path.wstring() + "\0\0";
+
+	auto pathstr = path.wstring();
+	pathstr += L"\0";
 
 	shfos.wFunc = FO_DELETE;
-	shfos.pFrom = wpath.wchar_str();
-	shfos.fFlags = FOF_ALLOWUNDO | FOF_SILENT | FOF_NOCONFIRMATION;
+	shfos.pFrom = pathstr.c_str();
+	shfos.pTo = NULL;
+	shfos.fFlags = FOF_ALLOWUNDO | FOF_SILENT | FOF_NOCONFIRMATION | FOF_NOERRORUI;
 
 	auto result = SHFileOperation(&shfos);
 	return !result;

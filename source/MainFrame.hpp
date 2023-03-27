@@ -7,7 +7,7 @@
 #include <cstdint>
 #include "ThreadPool.h"
 
-enum class Status {
+enum class Status : uint8_t {
 	NotStarted,
 	Queued,
 	InProgress,
@@ -28,6 +28,7 @@ public:
 	void OnExit(wxCommandEvent&);
 
 	void OnAddImages(wxCommandEvent&);
+	void OnAddImagesFromFolder(wxCommandEvent&);
 	void OnClear(wxCommandEvent&);
 	void OnRemoveImages(wxCommandEvent&);
 	void OnCompressAll(wxCommandEvent&);
@@ -41,7 +42,7 @@ private:
 	std::unordered_map<decltype(currentID),FileInfo> currentFiles;
 	bool isPaused = false;
 
-
+	void AddImagesImpl(const wxArrayString& filenames);
 	void DoFile(decltype(currentID));
 	bool DoPNG(const FileInfo&, std::vector<uint8_t>&);
 
