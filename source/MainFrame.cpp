@@ -193,6 +193,7 @@ void MainFrame::OnDispatchUIUpdateMainThread(wxCommandEvent& evt)
 				auto newsize = std::filesystem::file_size(fileid.path);
 				dataViewList->SetTextValue(sizeToString(newsize), row, 1);
 				dataViewList->SetTextValue(fmt::format("{}%",static_cast<int>(100 - (static_cast<double>(newsize) / fileid.orig_size) * 100)),row,3);
+				dataViewList->SetTextValue("Zopfli",row,4);	//TODO: when more compressors are added, set this properly
 			}
 			break;
 		case Status::Failed:
