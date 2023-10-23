@@ -77,4 +77,4 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: BatchCompress-Linux64
-          path: build\release\BatchCompress.exe
+          path: build/release/BatchCompress.AppImage
