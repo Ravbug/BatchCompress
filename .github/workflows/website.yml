@@ -1,0 +1,22 @@
+name: Build-Website
+on: push
+
+jobs:
+  build-site:
+    name: Build Website
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Prepare for upload
+        run: mv website _site
+      - name: Fix permissions
+        run: |
+         chmod -c -R +rX "_site/" | while read line; do
+           echo "::warning title=Invalid file permissions automatically fixed::$line"
+         done
+      - name: Upload 
+        uses: actions/upload-pages-artifact@v2
+

@@ -1,5 +1,9 @@
 name: Build-Release
 on: push
+  paths-ignore:
+    - "README.md"
+    - "website/*"
+
 jobs:
   build-mac:
     name: Build App for macOS
