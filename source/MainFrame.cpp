@@ -384,6 +384,9 @@ bool MainFrame::MoveToRecycleBin(const std::filesystem::path& path)
 
 #elif defined __APPLE__
 	return trashItem(path);
+#elif defined __linux__
+	// there is no trash API on linux. delete the file instead. 
+	std::filesystem::remove(path);
 #else
 #error This platform's trash is not supported -- implement this platform's trash API here
 #endif
