@@ -1,5 +1,11 @@
 name: Build-Release
-on: push
+on: 
+  push:
+    paths-ignore:
+      - "README.md"
+      - "website/*"
+      - ".github/workflows/website.yml"
+
 jobs:
   build-mac:
     name: Build App for macOS
