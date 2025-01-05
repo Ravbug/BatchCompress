@@ -13,9 +13,9 @@
 
 #ifdef _WIN32
 #include <shobjidl_core.h>
+#include <ShlObj_core.h>
 #define COM_SAFE_RELEASE(x) if (x != NULL) x->Release(); x = NULL
 #endif
-#include <ShlObj_core.h>
 
 #define DISPATCH_EVT 5000
 
@@ -243,14 +243,7 @@ void MainFrame::OnSelectionActivated(wxDataViewEvent& e)
 		}
 	}
 #elif defined __APPLE__
-	std::string str;
-	if (is_directory(file.path)) {
-		str = file.path;
-	}
-	else {
-		str = file.path.parent_path().string();
-	}
-	wxExecute(wxT("open \"" + str + "\""), wxEXEC_ASYNC);
+    RevealFile(file.path);
 #elif defined __linux__
 	std::string str;
 	if (std::filesystem::is_directory(file.path)) {

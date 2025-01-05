@@ -12,3 +12,9 @@ bool trashItem(const std::filesystem::path& path){
 //	}
 	return result;
 }
+
+void RevealFile(const std::filesystem::path& p){
+    const auto str = p.string();
+    auto urlstr = [NSString stringWithUTF8String:str.c_str()];
+    [[NSWorkspace sharedWorkspace] selectFile:urlstr inFileViewerRootedAtPath:@""];
+}
