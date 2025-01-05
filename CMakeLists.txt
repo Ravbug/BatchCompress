@@ -7,6 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIGURATION>)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/$<CONFIGURATION>)
 
+set(CMAKE_OSX_ARCHITECTURES "x86_64;arm64" CACHE INTERNAL "")
+
 if(MSVC)
   add_definitions(/MP)
   add_definitions(/Qpar)
@@ -48,6 +50,19 @@ INSTALL(CODE
 		fixup_bundle(\"${CMAKE_INSTALL_PREFIX}/$<CONFIGURATION>/${PROJECT_NAME}.app\" \"\" \"\")
 		" 
 		COMPONENT Runtime
+	)
+elseif(LINUX)
+INSTALL(CODE 
+	"include(${CMAKE_CURRENT_SOURCE_DIR}/appimage.cmake)
+	make_appimage(
+		EXE \"${CMAKE_INSTALL_PREFIX}/$<CONFIGURATION>/${PROJECT_NAME}\"
+		NAME \"${PROJECT_NAME}\"
+		ICON \"${CMAKE_CURRENT_SOURCE_DIR}/source/wxlin.xpm\"
+		OUTPUT_NAME \"${CMAKE_INSTALL_PREFIX}/$<CONFIGURATION>/${PROJECT_NAME}.AppImage\"
+		ASSETS \"\"
+	)
+	" 
+	COMPONENT Runtime
 	)
 endif()
 # windows app
