@@ -36,6 +36,8 @@ public:
 	void OnPause(wxCommandEvent&);
 	void OnSelectionActivated(wxDataViewEvent&);
 
+	void OnDropFiles(wxDropFilesEvent&);
+
 	DECLARE_EVENT_TABLE()
 private:
 	uint64_t currentID = 0;

@@ -3,6 +3,7 @@
 #include <zopflipng_lib.h>
 #include <fstream>
 #include <array>
+#include <format>
 #include <fmt/format.h>
 #include <wx/dirdlg.h>
 
@@ -14,8 +15,11 @@
 #include <shobjidl_core.h>
 #define COM_SAFE_RELEASE(x) if (x != NULL) x->Release(); x = NULL
 #endif
+#include <ShlObj_core.h>
 
 #define DISPATCH_EVT 5000
+
+constexpr static char* const version = "1.1";
 
 wxDEFINE_EVENT(dispatchEvt, wxCommandEvent);
 
@@ -83,6 +87,14 @@ MainFrame::MainFrame() : MainFrameBase(nullptr), threadpool(std::thread::hardwar
 	//in this case, the icon file is wxwin.ico, so the definition is IDI_WXWIN
 	SetIcon(wxIcon("IDI_WXWIN"));
 #endif
+	SetLabel(std::string("BatchCompress ") + version);
+
+	DragAcceptFiles(true);	// enable drag and drop
+
+	Bind(wxEVT_DROP_FILES, [this](wxDropFilesEvent& evt) {
+			OnDropFiles(evt); 
+		}
+	);
 }
 
 void MainFrame::OnAddImages(wxCommandEvent&)
@@ -210,19 +222,26 @@ void MainFrame::OnPause(wxCommandEvent&)
 
 void MainFrame::OnSelectionActivated(wxDataViewEvent& e)
 {
-	auto& file = currentFiles[e.GetInt()];
+	auto idx = dataViewList->GetSelectedRow();
+	auto& file = currentFiles[idx];
 
 	//reveal the file in the platform's explorer
 
 #ifdef _WIN32
-	std::string str;
-	if (std::filesystem::is_directory(file.path)) {
-		str = file.path.string();
+
+	PIDLIST_ABSOLUTE pidl;
+	SFGAOF attributes;
+	HRESULT hr = SHParseDisplayName(file.path.c_str(), nullptr, &pidl, 0, &attributes);
+	if (SUCCEEDED(hr)) {
+		if (pidl) {
+			LPITEMIDLIST pidlItem = ILFindLastID(pidl);
+			HRESULT hr2 = SHOpenFolderAndSelectItems(pidl, 1, const_cast<LPCITEMIDLIST*>(&pidlItem), 0);
+			ILFree(pidl);
+			if (FAILED(hr2)) {
+
+			}
+		}
 	}
-	else {
-		str = file.path.parent_path().string();
-	}
-	wxExecute(wxT("C:\\Windows\\explorer.exe \"" + str + "\""), wxEXEC_ASYNC);
 #elif defined __APPLE__
 	std::string str;
 	if (is_directory(file.path)) {
@@ -244,6 +263,13 @@ void MainFrame::OnSelectionActivated(wxDataViewEvent& e)
 #else
 #error This platform's open-in-explorer is not supported. Implement its API here.'
 #endif
+}
+
+void MainFrame::OnDropFiles(wxDropFilesEvent& evt)
+{
+	auto files = evt.GetFiles();
+	auto nfiles = evt.GetNumberOfFiles();
+	AddImagesImpl({ size_t(nfiles), files });
 }
 
 void MainFrame::DoFile(decltype(currentID) id)
