@@ -250,7 +250,7 @@ void MainFrame::OnSelectionActivated(wxDataViewEvent& e)
 		str = file.path.string();
 	}
 	else {
-		str = file.path.parent_path().string();
+		str = file.path.parent_path().string().ToStdString();
 	}
 	wxExecute(wxT("xdg-open \"" + str + "\""), wxEXEC_ASYNC);
 #else
