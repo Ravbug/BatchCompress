@@ -250,9 +250,10 @@ void MainFrame::OnSelectionActivated(wxDataViewEvent& e)
 		str = file.path.string();
 	}
 	else {
-		str = file.path.parent_path().string().ToStdString();
+		str = file.path.parent_path().string();
 	}
-	wxExecute(wxT("xdg-open \"" + str + "\""), wxEXEC_ASYNC);
+	auto cmd = fmt::format("xdg-open \"{str}\"",str);
+	wxExecute(cmd, wxEXEC_ASYNC);
 #else
 #error This platform's open-in-explorer is not supported. Implement its API here.'
 #endif
