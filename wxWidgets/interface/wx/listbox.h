@@ -111,7 +111,7 @@ public:
               const wxPoint& pos = wxDefaultPosition,
               const wxSize& size = wxDefaultSize,
               int n = 0,
-              const wxString choices[] = NULL,
+              const wxString choices[] = nullptr,
               long style = 0,
               const wxValidator& validator = wxDefaultValidator,
               const wxString& name = wxListBoxNameStr);
@@ -141,7 +141,7 @@ public:
     */
     virtual ~wxListBox();
 
-    //@{
+    ///@{
     /**
         Creates the listbox for two-step construction.
         See wxListBox() for further details.
@@ -149,7 +149,7 @@ public:
     bool Create(wxWindow *parent, wxWindowID id,
                 const wxPoint& pos = wxDefaultPosition,
                 const wxSize& size = wxDefaultSize,
-                int n = 0, const wxString choices[] = NULL,
+                int n = 0, const wxString choices[] = nullptr,
                 long style = 0,
                 const wxValidator& validator = wxDefaultValidator,
                 const wxString& name = wxListBoxNameStr);
@@ -160,7 +160,12 @@ public:
                 long style = 0,
                 const wxValidator& validator = wxDefaultValidator,
                 const wxString& name = wxListBoxNameStr);
-    //@}
+    ///@}
+
+    /**
+        return true if the listbox allows multiple selection
+    */
+    bool HasMultipleSelection() const;
 
     /**
         Deselects an item in the list box.
@@ -350,7 +355,7 @@ public:
 
         @since 3.1.4
      */
-    virtual void MSWSetTabStops(const wxVector<int>& tabStops);
+    virtual bool MSWSetTabStops(const wxVector<int>& tabStops);
 
     // NOTE: Phoenix needs to see the implementation of pure virtuals so it
     // knows that this class is not abstract.

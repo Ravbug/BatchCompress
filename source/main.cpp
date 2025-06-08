@@ -13,7 +13,10 @@ class BatchCompress : public wxApp
 {
 public:
     virtual bool OnInit() override{
-        
+#if _WIN32
+        MSWEnableDarkMode();
+        SetAppearance(Appearance::System);
+#endif
         frame = new MainFrame();
 #if __linux__
         frame->SetIcon(wxIcon(wxICON(wxlin)));

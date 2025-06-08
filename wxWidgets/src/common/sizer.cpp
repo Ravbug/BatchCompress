@@ -32,8 +32,8 @@
 #include "wx/vector.h"
 #include "wx/listimpl.cpp"
 #include "wx/private/window.h"
-#include "wx/scopedptr.h"
 
+#include <memory>
 
 //---------------------------------------------------------------------------
 
@@ -144,11 +144,124 @@ static const int SIZER_FLAGS_MASK =
     wxADD_FLAG(wxSHAPED,
     0))))))))))))))))));
 
+namespace
+{
+
+int gs_disableFlagChecks = -1;
+
+// Check condition taking gs_disableFlagChecks into account.
+//
+// Note that because this is not a macro, the condition is always evaluated,
+// even if gs_disableFlagChecks is 0, but this shouldn't matter because the
+// conditions used with this function are just simple bit checks.
+bool CheckSizerFlags(bool cond)
+{
+    // Once-only initialization: check if disabled via environment.
+    if ( gs_disableFlagChecks == -1 )
+    {
+        gs_disableFlagChecks = wxGetEnv("WXSUPPRESS_SIZER_FLAGS_CHECK", nullptr);
+    }
+
+    return gs_disableFlagChecks || cond;
+}
+
+wxString MakeFlagsCheckMessage(const char* start, const char* whatToRemove)
+{
+    return wxString::Format
+           (
+             "%s"
+             "\n\nDO NOT PANIC !!\n\n"
+             "If you're an end user running a program not developed by you, "
+             "please ignore this message, it is harmless, and please try "
+             "reporting the problem to the program developers.\n"
+             "\n"
+             "You may also set WXSUPPRESS_SIZER_FLAGS_CHECK environment "
+             "variable to suppress all such checks when running this program.\n"
+             "\n"
+             "If you're the developer, simply remove %s from your code to "
+             "avoid getting this message. You can also call "
+             "wxSizerFlags::DisableConsistencyChecks() to globally disable "
+             "all such checks, but this is strongly not recommended.",
+             start,
+             whatToRemove
+           );
+}
+
+bool CheckExpectedParentIs(wxWindow* w, wxWindow* expectedParent)
+{
+    wxWindow* parent = w->GetParent();
+
+    // We specifically exclude the case of a window with a null parent as it
+    // typically doesn't happen accidentally, but does happen intentionally in
+    // our own wxTabFrame which is a hack used by AUI for whatever reason, and
+    // could presumably be also done on purpose in application code.
+    if ( !parent )
+        return true;
+
+    // We also allow the window to be a (grand)grandchild of this window, as
+    // this happens with children of wxStaticBox in (possibly nested)
+    // wxStaticBoxSizer.
+    while ( parent != expectedParent )
+    {
+#if wxUSE_STATBOX
+        if ( wxDynamicCast(parent, wxStaticBox) )
+        {
+            parent = parent->GetParent();
+            if ( parent )
+                continue;
+        }
+#endif // wxUSE_STATBOX
+
+        return false;
+    }
+
+    return true;
+}
+
+wxString MakeExpectedParentMessage(wxWindow* w, wxWindow* expectedParent)
+{
+    return wxString::Format
+           (
+            "Windows managed by the sizer associated with the given "
+            "window must have this window as parent, otherwise they "
+            "will not be repositioned correctly.\n"
+            "\n"
+            "Please use the window %s with which this sizer is associated, "
+            "as the parent when creating the window %s managed by it.",
+            wxDumpWindow(expectedParent),
+            wxDumpWindow(w)
+           );
+}
+
+} // anonymous namespace
+
 #endif // wxDEBUG_LEVEL
 
-#define ASSERT_INCOMPATIBLE_NOT_USED_IMPL(f, f1, n1, f2, n2) \
-    wxASSERT_MSG(((f) & (f1 | f2)) != (f1 | f2), \
-                 n1 " and " n2 " can't be used together")
+#define ASSERT_NO_IGNORED_FLAGS_IMPL(f, value, name, explanation) \
+    wxASSERT_MSG                                                  \
+    (                                                             \
+      CheckSizerFlags(!((f) & (value))),                          \
+      MakeFlagsCheckMessage                                       \
+      (                                                           \
+        name " will be ignored in this sizer: " explanation,      \
+        "this flag"                                               \
+      )                                                           \
+    )
+
+#define ASSERT_NO_IGNORED_FLAGS(f, flags, explanation) \
+    ASSERT_NO_IGNORED_FLAGS_IMPL(f, flags, #flags, explanation)
+
+#define ASSERT_INCOMPATIBLE_NOT_USED_IMPL(f, f1, n1, f2, n2)       \
+    wxASSERT_MSG                                                   \
+    (                                                              \
+      CheckSizerFlags(((f) & (f1 | f2)) != (f1 | f2)),             \
+      MakeFlagsCheckMessage                                        \
+      (                                                            \
+        "One of " n1 " and " n2 " will be ignored in this sizer: " \
+        "they are incompatible and cannot be used together",       \
+        "one of these flags"                                       \
+      )                                                            \
+    )
 
 #define ASSERT_INCOMPATIBLE_NOT_USED(f, f1, f2) \
     ASSERT_INCOMPATIBLE_NOT_USED_IMPL(f, f1, #f1, f2, #f2)
@@ -158,6 +271,26 @@ static const int SIZER_FLAGS_MASK =
     ASSERT_INCOMPATIBLE_NOT_USED(f, wxALIGN_CENTRE_HORIZONTAL, wxALIGN_RIGHT); \
     ASSERT_INCOMPATIBLE_NOT_USED(f, wxALIGN_CENTRE_VERTICAL, wxALIGN_BOTTOM)
 
+// Verify that the given window has the expected parent.
+//
+// Both pointers must be non-null.
+//
+// Note that this is a serious error and that, unlike for benign sizer flag
+// checks, it can't be disabled by setting some environment variable.
+#define ASSERT_WINDOW_PARENT_IS(w, expectedParent)   \
+    wxASSERT_MSG                                     \
+    (                                                \
+        CheckExpectedParentIs(w, expectedParent),    \
+        MakeExpectedParentMessage(w, expectedParent) \
+    )
+
+/* static */
+void wxSizerFlags::DisableConsistencyChecks()
+{
+#if wxDEBUG_LEVEL
+    gs_disableFlagChecks = true;
+#endif // wxDEBUG_LEVEL
+}
 
 void wxSizerItem::Init(const wxSizerFlags& flags)
 {
@@ -183,7 +316,7 @@ wxSizerItem::wxSizerItem()
 // window item
 void wxSizerItem::DoSetWindow(wxWindow *window)
 {
-    wxCHECK_RET( window, wxT("NULL window in wxSizerItem::SetWindow()") );
+    wxCHECK_RET( window, wxT("null window in wxSizerItem::SetWindow()") );
 
     m_kind = Item_Window;
     m_window = window;
@@ -228,7 +361,7 @@ wxSizerItem::wxSizerItem(wxSizer *sizer,
                          int border,
                          wxObject* userData)
            : m_kind(Item_None),
-             m_sizer(NULL),
+             m_sizer(nullptr),
              m_proportion(proportion),
              m_border(border),
              m_flag(flag),
@@ -286,7 +419,7 @@ wxSizerItem::wxSizerItem(int width,
                          int border,
                          wxObject* userData)
            : m_kind(Item_None),
-             m_sizer(NULL),
+             m_sizer(nullptr),
              m_minSize(width, height), // minimal size is the initial size
              m_proportion(proportion),
              m_border(border),
@@ -313,7 +446,7 @@ void wxSizerItem::Free()
             break;
 
         case Item_Window:
-            m_window->SetContainingSizer(NULL);
+            m_window->SetContainingSizer(nullptr);
             break;
 
         case Item_Sizer:
@@ -587,7 +720,7 @@ void wxSizerItem::DeleteWindows()
             //We are deleting the window from this sizer - normally
             //the window destroys the sizer associated with it,
             //which might destroy this, which we don't want
-            m_window->SetContainingSizer(NULL);
+            m_window->SetContainingSizer(nullptr);
             m_window->Destroy();
             //Putting this after the switch will result in a spacer
             //not being deleted properly on destruction
@@ -669,7 +802,7 @@ bool wxSizerItem::IsShown() const
 
 wxSizer::~wxSizer()
 {
-    WX_CLEAR_LIST(wxSizerItemList, m_children);
+    wxClearList(m_children);
 }
 
 wxSizerItem* wxSizer::DoInsert( size_t index, wxSizerItem *item )
@@ -699,13 +832,25 @@ wxSizerItem* wxSizer::DoInsert( size_t index, wxSizerItem *item )
         }
 
     private:
-        wxScopedPtr<wxSizerItem> m_item;
+        std::unique_ptr<wxSizerItem> m_item;
     };
 
     ContainingSizerGuard guard( item );
 
-    if ( item->GetWindow() )
-        item->GetWindow()->SetContainingSizer( this );
+    if ( wxWindow* const w = item->GetWindow() )
+    {
+        w->SetContainingSizer( this );
+
+        // If possible, detect adding windows with a wrong parent to the sizer
+        // as early as possible, as this allows to see where exactly it happens
+        // (otherwise this will be checked when the containing window is set
+        // later, but by this time the stack trace at the moment of assertion
+        // won't point out the culprit any longer).
+        if ( m_containingWindow )
+        {
+            ASSERT_WINDOW_PARENT_IS(w, m_containingWindow);
+        }
+    }
 
     if ( item->GetSizer() )
         item->GetSizer()->SetContainingWindow( m_containingWindow );
@@ -713,6 +858,22 @@ wxSizerItem* wxSizer::DoInsert( size_t index, wxSizerItem *item )
     m_children.Insert( index, item );
 
     return guard.Release();
+}
+
+wxSizerItemList::compatibility_iterator wxSizer::GetChildNode(size_t index) const
+{
+    wxCHECK_MSG
+    (
+        index < m_children.GetCount(),
+        {},
+        wxString::Format
+        (
+            "Invalid sizer item child index %zu, sizer has only %zu elements.",
+            index, m_children.GetCount()
+        )
+    );
+
+    return m_children.Item( index );
 }
 
 void wxSizer::SetContainingWindow(wxWindow *win)
@@ -724,23 +885,30 @@ void wxSizer::SetContainingWindow(wxWindow *win)
 
     // set the same window for all nested sizers as well, they also are in the
     // same window
-    for ( wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-          node;
-          node = node->GetNext() )
+    for ( const wxSizerItem* item: m_children )
     {
-        wxSizerItem *const item = node->GetData();
         wxSizer *const sizer = item->GetSizer();
 
         if ( sizer )
         {
             sizer->SetContainingWindow(win);
         }
+
+        // If we have a valid containing window, check that all windows managed
+        // by this sizer were correctly created using it as parent.
+        if ( m_containingWindow )
+        {
+            if ( wxWindow* const w = item->GetWindow() )
+            {
+                ASSERT_WINDOW_PARENT_IS(w, m_containingWindow);
+            }
+        }
     }
 }
 
 bool wxSizer::Remove( wxSizer *sizer )
 {
-    wxASSERT_MSG( sizer, wxT("Removing NULL sizer") );
+    wxASSERT_MSG( sizer, wxT("Removing null sizer") );
 
     wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
     while (node)
@@ -762,13 +930,11 @@ bool wxSizer::Remove( wxSizer *sizer )
 
 bool wxSizer::Remove( int index )
 {
-    wxCHECK_MSG( index >= 0 && (size_t)index < m_children.GetCount(),
-                 false,
-                 wxT("Remove index is out of range") );
+    wxCHECK_MSG( index >= 0, false, wxT("Index must be positive") );
 
-    wxSizerItemList::compatibility_iterator node = m_children.Item( index );
-
-    wxCHECK_MSG( node, false, wxT("Failed to find child node") );
+    const auto node = GetChildNode(static_cast<size_t>(index));
+    if ( !node )
+        return false;
 
     delete node->GetData();
     m_children.Erase( node );
@@ -778,7 +944,7 @@ bool wxSizer::Remove( int index )
 
 bool wxSizer::Detach( wxSizer *sizer )
 {
-    wxASSERT_MSG( sizer, wxT("Detaching NULL sizer") );
+    wxASSERT_MSG( sizer, wxT("Detaching null sizer") );
 
     wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
     while (node)
@@ -798,9 +964,9 @@ bool wxSizer::Detach( wxSizer *sizer )
     return false;
 }
 
-bool wxSizer::Detach( wxWindow *window )
+bool wxSizer::Detach( wxWindowBase *window )
 {
-    wxASSERT_MSG( window, wxT("Detaching NULL window") );
+    wxASSERT_MSG( window, wxT("Detaching null window") );
 
     wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
     while (node)
@@ -821,13 +987,11 @@ bool wxSizer::Detach( wxWindow *window )
 
 bool wxSizer::Detach( int index )
 {
-    wxCHECK_MSG( index >= 0 && (size_t)index < m_children.GetCount(),
-                 false,
-                 wxT("Detach index is out of range") );
+    wxCHECK_MSG( index >= 0, false, wxT("Index must be positive") );
 
-    wxSizerItemList::compatibility_iterator node = m_children.Item( index );
-
-    wxCHECK_MSG( node, false, wxT("Failed to find child node") );
+    const auto node = GetChildNode(static_cast<size_t>(index));
+    if ( !node )
+        return false;
 
     wxSizerItem *item = node->GetData();
 
@@ -841,14 +1005,11 @@ bool wxSizer::Detach( int index )
 
 bool wxSizer::Replace( wxWindow *oldwin, wxWindow *newwin, bool recursive )
 {
-    wxASSERT_MSG( oldwin, wxT("Replacing NULL window") );
-    wxASSERT_MSG( newwin, wxT("Replacing with NULL window") );
+    wxASSERT_MSG( oldwin, wxT("Replacing null window") );
+    wxASSERT_MSG( newwin, wxT("Replacing with null window") );
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetWindow() == oldwin)
         {
             item->AssignWindow(newwin);
@@ -860,8 +1021,6 @@ bool wxSizer::Replace( wxWindow *oldwin, wxWindow *newwin, bool recursive )
             if (item->GetSizer()->Replace( oldwin, newwin, true ))
                 return true;
         }
-
-        node = node->GetNext();
     }
 
     return false;
@@ -869,14 +1028,11 @@ bool wxSizer::Replace( wxWindow *oldwin, wxWindow *newwin, bool recursive )
 
 bool wxSizer::Replace( wxSizer *oldsz, wxSizer *newsz, bool recursive )
 {
-    wxASSERT_MSG( oldsz, wxT("Replacing NULL sizer") );
-    wxASSERT_MSG( newsz, wxT("Replacing with NULL sizer") );
+    wxASSERT_MSG( oldsz, wxT("Replacing null sizer") );
+    wxASSERT_MSG( newsz, wxT("Replacing with null sizer") );
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetSizer() == oldsz)
         {
             item->AssignSizer(newsz);
@@ -887,8 +1043,6 @@ bool wxSizer::Replace( wxSizer *oldsz, wxSizer *newsz, bool recursive )
             if (item->GetSizer()->Replace( oldsz, newsz, true ))
                 return true;
         }
-
-        node = node->GetNext();
     }
 
     return false;
@@ -896,18 +1050,17 @@ bool wxSizer::Replace( wxSizer *oldsz, wxSizer *newsz, bool recursive )
 
 bool wxSizer::Replace( size_t old, wxSizerItem *newitem )
 {
-    wxCHECK_MSG( old < m_children.GetCount(), false, wxT("Replace index is out of range") );
-    wxCHECK_MSG( newitem, false, wxT("Replacing with NULL item") );
+    wxCHECK_MSG( newitem, false, wxT("Replacing with null item") );
 
-    wxSizerItemList::compatibility_iterator node = m_children.Item( old );
-
-    wxCHECK_MSG( node, false, wxT("Failed to find child node") );
+    auto node = GetChildNode(old);
+    if ( !node )
+        return false;
 
     wxSizerItem *item = node->GetData();
     node->SetData(newitem);
 
     if (wxWindow* const w = item->GetWindow())
-        w->SetContainingSizer(NULL);
+        w->SetContainingSizer(nullptr);
 
     delete item;
 
@@ -920,14 +1073,10 @@ bool wxSizer::Replace( size_t old, wxSizerItem *newitem )
 void wxSizer::Clear( bool delete_windows )
 {
     // First clear the ContainingSizer pointers
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( const wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->IsWindow())
-            item->GetWindow()->SetContainingSizer( NULL );
-        node = node->GetNext();
+            item->GetWindow()->SetContainingSizer( nullptr );
     }
 
     // Destroy the windows if needed
@@ -935,24 +1084,20 @@ void wxSizer::Clear( bool delete_windows )
         DeleteWindows();
 
     // Now empty the list
-    WX_CLEAR_LIST(wxSizerItemList, m_children);
+    wxClearList(m_children);
 }
 
 void wxSizer::DeleteWindows()
 {
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         item->DeleteWindows();
-        node = node->GetNext();
     }
 }
 
 wxSize wxSizer::ComputeFittingClientSize(wxWindow *window)
 {
-    wxCHECK_MSG( window, wxDefaultSize, "window can't be NULL" );
+    wxCHECK_MSG( window, wxDefaultSize, "window can't be null" );
 
     // take the min size by default and limit it by max size
     wxSize size = GetMinClientSize(window);
@@ -994,17 +1139,17 @@ wxSize wxSizer::ComputeFittingClientSize(wxWindow *window)
 
 wxSize wxSizer::ComputeFittingWindowSize(wxWindow *window)
 {
-    wxCHECK_MSG( window, wxDefaultSize, "window can't be NULL" );
+    wxCHECK_MSG( window, wxDefaultSize, "window can't be null" );
 
     return window->ClientToWindowSize(ComputeFittingClientSize(window));
 }
 
 wxSize wxSizer::Fit( wxWindow *window )
 {
-    wxCHECK_MSG( window, wxDefaultSize, "window can't be NULL" );
+    wxCHECK_MSG( window, wxDefaultSize, "window can't be null" );
 
     // set client size
-    window->WXSetInitialFittingClientSize(wxSIZE_SET_CURRENT);
+    window->WXSetInitialFittingClientSize(wxSIZE_SET_CURRENT, this);
 
     // return entire size
     return window->GetSize();
@@ -1044,15 +1189,9 @@ void wxSizer::SetSizeHints( wxWindow *window )
 {
     // Preserve the window's max size hints, but set the
     // lower bound according to the sizer calculations.
-    window->WXSetInitialFittingClientSize(wxSIZE_SET_CURRENT | wxSIZE_SET_MIN);
+    window->WXSetInitialFittingClientSize(wxSIZE_SET_CURRENT | wxSIZE_SET_MIN,
+                                          this);
 }
-
-#if WXWIN_COMPATIBILITY_2_8
-void wxSizer::SetVirtualSizeHints( wxWindow *window )
-{
-    FitInside( window );
-}
-#endif // WXWIN_COMPATIBILITY_2_8
 
 // TODO on mac we need a function that determines how much free space this
 // min size contains, in order to make sure that we have 20 pixels of free
@@ -1098,37 +1237,29 @@ void wxSizer::DoSetMinSize( int width, int height )
 
 bool wxSizer::DoSetItemMinSize( wxWindow *window, int width, int height )
 {
-    wxASSERT_MSG( window, wxT("SetMinSize for NULL window") );
+    wxASSERT_MSG( window, wxT("SetMinSize for null window") );
 
     // Is it our immediate child?
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetWindow() == window)
         {
             item->SetMinSize( width, height );
             return true;
         }
-        node = node->GetNext();
     }
 
     // No?  Search any subsizers we own then
 
-    node = m_children.GetFirst();
-    while (node)
+    for ( const wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if ( item->GetSizer() &&
              item->GetSizer()->DoSetItemMinSize( window, width, height ) )
         {
             // A child sizer found the requested windw, exit.
             return true;
         }
-        node = node->GetNext();
     }
 
     return false;
@@ -1136,37 +1267,29 @@ bool wxSizer::DoSetItemMinSize( wxWindow *window, int width, int height )
 
 bool wxSizer::DoSetItemMinSize( wxSizer *sizer, int width, int height )
 {
-    wxASSERT_MSG( sizer, wxT("SetMinSize for NULL sizer") );
+    wxASSERT_MSG( sizer, wxT("SetMinSize for null sizer") );
 
     // Is it our immediate child?
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( const wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetSizer() == sizer)
         {
             item->GetSizer()->DoSetMinSize( width, height );
             return true;
         }
-        node = node->GetNext();
     }
 
     // No?  Search any subsizers we own then
 
-    node = m_children.GetFirst();
-    while (node)
+    for ( const wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if ( item->GetSizer() &&
              item->GetSizer()->DoSetItemMinSize( sizer, width, height ) )
         {
             // A child found the requested sizer, exit.
             return true;
         }
-        node = node->GetNext();
     }
 
     return false;
@@ -1174,9 +1297,9 @@ bool wxSizer::DoSetItemMinSize( wxSizer *sizer, int width, int height )
 
 bool wxSizer::DoSetItemMinSize( size_t index, int width, int height )
 {
-    wxSizerItemList::compatibility_iterator node = m_children.Item( index );
-
-    wxCHECK_MSG( node, false, wxT("Failed to find child node") );
+    const auto node = GetChildNode(index);
+    if ( !node )
+        return false;
 
     wxSizerItem     *item = node->GetData();
 
@@ -1196,13 +1319,10 @@ bool wxSizer::DoSetItemMinSize( size_t index, int width, int height )
 
 wxSizerItem* wxSizer::GetItem( wxWindow *window, bool recursive )
 {
-    wxASSERT_MSG( window, wxT("GetItem for NULL window") );
+    wxASSERT_MSG( window, wxT("GetItem for null window") );
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetWindow() == window)
         {
             return item;
@@ -1213,22 +1333,17 @@ wxSizerItem* wxSizer::GetItem( wxWindow *window, bool recursive )
             if (subitem)
                 return subitem;
         }
-
-        node = node->GetNext();
     }
 
-    return NULL;
+    return nullptr;
 }
 
 wxSizerItem* wxSizer::GetItem( wxSizer *sizer, bool recursive )
 {
-    wxASSERT_MSG( sizer, wxT("GetItem for NULL sizer") );
+    wxASSERT_MSG( sizer, wxT("GetItem for null sizer") );
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem *item = node->GetData();
-
         if (item->GetSizer() == sizer)
         {
             return item;
@@ -1239,20 +1354,18 @@ wxSizerItem* wxSizer::GetItem( wxSizer *sizer, bool recursive )
             if (subitem)
                 return subitem;
         }
-
-        node = node->GetNext();
     }
 
-    return NULL;
+    return nullptr;
 }
 
 wxSizerItem* wxSizer::GetItem( size_t index )
 {
-    wxCHECK_MSG( index < m_children.GetCount(),
-                 NULL,
-                 wxT("GetItem index is out of range") );
+    const auto node = GetChildNode(index);
+    if ( !node )
+        return nullptr;
 
-    return m_children.Item( index )->GetData();
+    return node->GetData();
 }
 
 wxSizerItem* wxSizer::GetItemById( int id, bool recursive )
@@ -1260,11 +1373,8 @@ wxSizerItem* wxSizer::GetItemById( int id, bool recursive )
     // This gets a sizer item by the id of the sizer item
     // and NOT the id of a window if the item is a window.
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetId() == id)
         {
             return item;
@@ -1275,11 +1385,9 @@ wxSizerItem* wxSizer::GetItemById( int id, bool recursive )
             if (subitem)
                 return subitem;
         }
-
-        node = node->GetNext();
     }
 
-    return NULL;
+    return nullptr;
 }
 
 bool wxSizer::Show( wxWindow *window, bool show, bool recursive )
@@ -1323,22 +1431,18 @@ bool wxSizer::Show( size_t index, bool show)
 
 void wxSizer::ShowItems( bool show )
 {
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        node->GetData()->Show( show );
-        node = node->GetNext();
+        item->Show( show );
     }
 }
 
 bool wxSizer::AreAnyItemsShown() const
 {
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( const wxSizerItem* item: m_children )
     {
-        if ( node->GetData()->IsShown() )
+        if ( item->IsShown() )
             return true;
-        node = node->GetNext();
     }
 
     return false;
@@ -1346,16 +1450,12 @@ bool wxSizer::AreAnyItemsShown() const
 
 bool wxSizer::IsShown( wxWindow *window ) const
 {
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( const wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetWindow() == window)
         {
             return item->IsShown();
         }
-        node = node->GetNext();
     }
 
     wxFAIL_MSG( wxT("IsShown failed to find sizer item") );
@@ -1365,16 +1465,12 @@ bool wxSizer::IsShown( wxWindow *window ) const
 
 bool wxSizer::IsShown( wxSizer *sizer ) const
 {
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( const wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
-
         if (item->GetSizer() == sizer)
         {
             return item->IsShown();
         }
-        node = node->GetNext();
     }
 
     wxFAIL_MSG( wxT("IsShown failed to find sizer item") );
@@ -1384,11 +1480,11 @@ bool wxSizer::IsShown( wxSizer *sizer ) const
 
 bool wxSizer::IsShown( size_t index ) const
 {
-    wxCHECK_MSG( index < m_children.GetCount(),
-                 false,
-                 wxT("IsShown index is out of range") );
+    const auto node = GetChildNode(index);
+    if ( !node )
+        return false;
 
-    return m_children.Item( index )->GetData()->IsShown();
+    return node->GetData()->IsShown();
 }
 
 
@@ -1435,7 +1531,7 @@ wxGridSizer::wxGridSizer( int rows, int cols, const wxSize& gap )
 wxSizerItem *wxGridSizer::DoInsert(size_t index, wxSizerItem *item)
 {
     // Ensure that the item will be deleted in case of exception.
-    wxScopedPtr<wxSizerItem> scopedItem( item );
+    std::unique_ptr<wxSizerItem> scopedItem( item );
 
     // if only the number of columns or the number of rows is specified for a
     // sizer, arbitrarily many items can be added to it but if both of them are
@@ -1471,9 +1567,16 @@ wxSizerItem *wxGridSizer::DoInsert(size_t index, wxSizerItem *item)
         // Check that expansion will happen in at least one of the directions.
         wxASSERT_MSG
         (
-            !(flags & (wxALIGN_BOTTOM | wxALIGN_CENTRE_VERTICAL)) ||
-                !(flags & (wxALIGN_RIGHT | wxALIGN_CENTRE_HORIZONTAL)),
-            wxS("wxEXPAND flag will be overridden by alignment flags")
+            CheckSizerFlags
+            (
+                !(flags & (wxALIGN_BOTTOM | wxALIGN_CENTRE_VERTICAL)) ||
+                    !(flags & (wxALIGN_RIGHT | wxALIGN_CENTRE_HORIZONTAL))
+            ),
+            MakeFlagsCheckMessage
+            (
+                "wxEXPAND flag will be overridden by alignment flags",
+                "either wxEXPAND or the alignment in at least one direction"
+            )
         );
     }
 
@@ -1496,8 +1599,8 @@ int wxGridSizer::CalcRowsCols(int& nrows, int& ncols) const
 
 void wxGridSizer::RepositionChildren(const wxSize& WXUNUSED(minSize))
 {
-    int nitems, nrows, ncols;
-    if ( (nitems = CalcRowsCols(nrows, ncols)) == 0 )
+    int nrows, ncols;
+    if ( CalcRowsCols(nrows, ncols) == 0 )
         return;
 
     wxSize sz( GetSize() );
@@ -1506,24 +1609,23 @@ void wxGridSizer::RepositionChildren(const wxSize& WXUNUSED(minSize))
     int w = (sz.x - (ncols - 1) * m_hgap) / ncols;
     int h = (sz.y - (nrows - 1) * m_vgap) / nrows;
 
-    int x = pt.x;
-    for (int c = 0; c < ncols; c++)
+    wxSizerItemList::const_iterator i = m_children.begin();
+    const wxSizerItemList::const_iterator end = m_children.end();
+
+    int y = pt.y;
+    for (int r = 0; r < nrows; r++)
     {
-        int y = pt.y;
-        for (int r = 0; r < nrows; r++)
+        int x = pt.x;
+        for (int c = 0; c < ncols; c++, ++i)
         {
-            int i = r * ncols + c;
-            if (i < nitems)
-            {
-                wxSizerItemList::compatibility_iterator node = m_children.Item( i );
+            if ( i == end )
+                return;
 
-                wxASSERT_MSG( node, wxT("Failed to find SizerItemList node") );
+            SetItemBounds(*i, x, y, w, h);
 
-                SetItemBounds( node->GetData(), x, y, w, h);
-            }
-            y = y + h + m_vgap;
+            x += w + m_hgap;
         }
-        x = x + w + m_hgap;
+        y += h + m_vgap;
     }
 }
 
@@ -1537,44 +1639,32 @@ wxSize wxGridSizer::CalcMin()
     int w = 0;
     int h = 0;
 
-    wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
         wxSize           sz( item->CalcMin() );
 
         w = wxMax( w, sz.x );
         h = wxMax( h, sz.y );
-
-        node = node->GetNext();
     }
 
     // In case we have a nested sizer with a two step algo , give it
     // a chance to adjust to that (we give it width component)
-    node = m_children.GetFirst();
     bool didChangeMinSize = false;
-    while (node)
+    for ( wxSizerItem* item: m_children )
     {
-        wxSizerItem     *item = node->GetData();
         didChangeMinSize |= item->InformFirstDirection( wxHORIZONTAL, w, -1 );
-
-        node = node->GetNext();
     }
 
     // And redo iteration in case min size changed
     if( didChangeMinSize )
     {
-        node = m_children.GetFirst();
         w = h = 0;
-        while (node)
+        for ( const wxSizerItem* item: m_children )
         {
-            wxSizerItem     *item = node->GetData();
             wxSize           sz( item->GetMinSizeWithBorder() );
 
             w = wxMax( w, sz.x );
             h = wxMax( h, sz.y );
-
-            node = node->GetNext();
         }
     }
 
@@ -1846,7 +1936,7 @@ void wxFlexGridSizer::AdjustForFlexDirection()
 //      delta: the extra space, we do nothing unless it's positive
 //      growable: indices or growable rows/cols in sizes array
 //      sizes: the height/widths of rows/cols to adjust
-//      proportions: proportions of the growable rows/cols or NULL if they all
+//      proportions: proportions of the growable rows/cols or nullptr if they all
 //                   should be assumed to have proportion of 1
 static void
 DoAdjustForGrowables(int delta,
@@ -1918,8 +2008,9 @@ DoAdjustForGrowables(int delta,
     }
 }
 
-void wxFlexGridSizer::AdjustForGrowables(const wxSize& sz, const wxSize& minSize)
+void wxFlexGridSizer::AdjustForGrowables(const wxSize& sz, const wxSize& originalMinSize)
 {
+    wxSize minSize = originalMinSize;
 #if wxDEBUG_LEVEL
     // by the time this function is called, the sizer should be already fully
     // initialized and hence the number of its columns and rows is known and we
@@ -1951,16 +2042,23 @@ void wxFlexGridSizer::AdjustForGrowables(const wxSize& sz, const wxSize& minSize
     }
 #endif // wxDEBUG_LEVEL
 
+    // Use growable columns proportions if we are flexible in this direction.
+    const wxArrayInt* const growableColsProportions =
+        (m_flexDirection & wxHORIZONTAL) || (m_growMode == wxFLEX_GROWMODE_SPECIFIED)
+            ? &m_growableColsProportions
+            : nullptr;
 
-    if ( (m_flexDirection & wxHORIZONTAL) || (m_growMode != wxFLEX_GROWMODE_NONE) )
+    // And do anything at all with the columns if we're either flexible or must
+    // resize all columns uniformly (otherwise we use wxFLEX_GROWMODE_NONE and
+    // there is nothing to do).
+    if ( growableColsProportions || (m_growMode == wxFLEX_GROWMODE_ALL) )
     {
         DoAdjustForGrowables
         (
             sz.x - minSize.x,
             m_growableCols,
             m_colWidths,
-            m_growMode == wxFLEX_GROWMODE_SPECIFIED ? &m_growableColsProportions
-                                                    : NULL
+            growableColsProportions
         );
 
         // This gives nested objects that benefit from knowing one size
@@ -1982,28 +2080,33 @@ void wxFlexGridSizer::AdjustForGrowables(const wxSize& sz, const wxSize& minSize
         // Only redo if info was actually used
         if( didAdjustMinSize )
         {
+            minSize = CalcMin();
             DoAdjustForGrowables
             (
                 sz.x - minSize.x,
                 m_growableCols,
                 m_colWidths,
-                m_growMode == wxFLEX_GROWMODE_SPECIFIED ? &m_growableColsProportions
-                                                        : NULL
+                growableColsProportions
             );
         }
     }
 
-    if ( (m_flexDirection & wxVERTICAL) || (m_growMode != wxFLEX_GROWMODE_NONE) )
+    // Same as above but for the rows.
+    const wxArrayInt* const growableRowsProportions =
+        (m_flexDirection & wxVERTICAL) || (m_growMode == wxFLEX_GROWMODE_SPECIFIED)
+            ? &m_growableRowsProportions
+            : nullptr;
+
+    if ( growableRowsProportions || (m_growMode == wxFLEX_GROWMODE_ALL) )
     {
-        // pass NULL instead of proportions if the grow mode is ALL as we
+        // pass nullptr instead of proportions if the grow mode is ALL as we
         // should treat all rows as having proportion of 1 then
         DoAdjustForGrowables
         (
             sz.y - minSize.y,
             m_growableRows,
             m_rowHeights,
-            m_growMode == wxFLEX_GROWMODE_SPECIFIED ? &m_growableRowsProportions
-                                                    : NULL
+            growableRowsProportions
         );
     }
 }
@@ -2083,10 +2186,10 @@ wxSizerItem *wxBoxSizer::DoInsert(size_t index, wxSizerItem *item)
     const int flags = item->GetFlag();
     if ( IsVertical() )
     {
-        wxASSERT_MSG
+        ASSERT_NO_IGNORED_FLAGS
         (
-            !(flags & wxALIGN_BOTTOM),
-            wxS("Vertical alignment flags are ignored in vertical sizers")
+            flags, wxALIGN_BOTTOM,
+            "only horizontal alignment flags can be used in vertical sizers"
         );
 
         // We need to accept wxALIGN_CENTRE_VERTICAL when it is combined with
@@ -2094,49 +2197,43 @@ wxSizerItem *wxBoxSizer::DoInsert(size_t index, wxSizerItem *item)
         // and we accept it historically in wxSizer API.
         if ( !(flags & wxALIGN_CENTRE_HORIZONTAL) )
         {
-            wxASSERT_MSG
+            ASSERT_NO_IGNORED_FLAGS
             (
-                !(flags & wxALIGN_CENTRE_VERTICAL),
-                wxS("Vertical alignment flags are ignored in vertical sizers")
-            );
-        }
-
-        // Note that using alignment with wxEXPAND can make sense if wxSHAPED
-        // is also used, as the item doesn't necessarily fully expand in the
-        // other direction in this case.
-        if ( (flags & wxEXPAND) && !(flags & wxSHAPED) )
-        {
-            wxASSERT_MSG
-            (
-                !(flags & (wxALIGN_RIGHT | wxALIGN_CENTRE_HORIZONTAL)),
-                wxS("Horizontal alignment flags are ignored with wxEXPAND")
+                flags, wxALIGN_CENTRE_VERTICAL,
+                "only horizontal alignment flags can be used in vertical sizers"
             );
         }
     }
     else // horizontal
     {
-        wxASSERT_MSG
+        ASSERT_NO_IGNORED_FLAGS
         (
-            !(flags & wxALIGN_RIGHT),
-            wxS("Horizontal alignment flags are ignored in horizontal sizers")
+            flags, wxALIGN_RIGHT,
+            "only vertical alignment flags can be used in horizontal sizers"
         );
 
         if ( !(flags & wxALIGN_CENTRE_VERTICAL) )
         {
-            wxASSERT_MSG
+            ASSERT_NO_IGNORED_FLAGS
             (
-                !(flags & wxALIGN_CENTRE_HORIZONTAL),
-                wxS("Horizontal alignment flags are ignored in horizontal sizers")
+                flags, wxALIGN_CENTRE_HORIZONTAL,
+                "only vertical alignment flags can be used in horizontal sizers"
             );
         }
+    }
 
-        if ( (flags & wxEXPAND) && !(flags & wxSHAPED) )
-        {
-            wxASSERT_MSG(
-                !(flags & (wxALIGN_BOTTOM | wxALIGN_CENTRE_VERTICAL)),
-                wxS("Vertical alignment flags are ignored with wxEXPAND")
-            );
-        }
+    // Note that using alignment with wxEXPAND can make sense if wxSHAPED
+    // is also used, as the item doesn't necessarily fully expand in the
+    // other direction in this case.
+    if ( (flags & wxEXPAND) && !(flags & wxSHAPED) )
+    {
+        ASSERT_NO_IGNORED_FLAGS
+        (
+            flags,
+            wxALIGN_RIGHT | wxALIGN_CENTRE_HORIZONTAL |
+            wxALIGN_BOTTOM | wxALIGN_CENTRE_VERTICAL,
+            "wxEXPAND overrides alignment flags in box sizers"
+        );
     }
 
     return wxSizer::DoInsert(index, item);
@@ -2343,7 +2440,7 @@ void wxBoxSizer::RepositionChildren(const wxSize& minSize)
             if ( propItem )
             {
                 // is the desired size of this item big enough?
-                if ( (remaining*propItem)/totalProportion >= minMajor )
+                if ( wxMulDivInt32(remaining, propItem, totalProportion) >= minMajor )
                 {
                     // yes, it is, we'll determine the real size of this
                     // item later, for now just leave it as wxDefaultCoord
@@ -2440,7 +2537,7 @@ void wxBoxSizer::RepositionChildren(const wxSize& minSize)
             if ( majorSizes[n] == wxDefaultCoord )
             {
                 const int propItem = item->GetProportion();
-                majorSizes[n] = (remaining*propItem)/totalProportion;
+                majorSizes[n] = wxMulDivInt32(remaining, propItem, totalProportion);
 
                 remaining -= majorSizes[n];
                 totalProportion -= propItem;
@@ -2579,13 +2676,9 @@ wxBoxSizer::InformFirstDirection(int direction, int size, int availableOtherDir)
 
     bool didUse = false;
 
-    for ( wxSizerItemList::compatibility_iterator node = m_children.GetFirst();
-          node;
-          node = node->GetNext() )
+    for ( wxSizerItem* item: m_children )
     {
-        didUse |= node->GetData()->InformFirstDirection(direction,
-                                                        size,
-                                                        availableOtherDir);
+        didUse |= item->InformFirstDirection(direction, size, availableOtherDir);
     }
 
     return didUse;
@@ -2632,6 +2725,67 @@ wxStaticBoxSizer::~wxStaticBoxSizer()
         m_staticBox->WXDestroyWithoutChildren();
 }
 
+bool wxStaticBoxSizer::CheckForNonBoxChildren(wxSizer* sizer) const
+{
+    for ( const wxSizerItem* item: sizer->GetChildren() )
+    {
+        if ( wxWindow* const win = item->GetWindow() )
+        {
+            if ( CheckIfNonBoxChild(win) )
+                return true;
+        }
+        else if ( wxSizer* const subsizer = item->GetSizer() )
+        {
+            if ( CheckForNonBoxChildren(subsizer) )
+                return true;
+        }
+    }
+
+    return false;
+}
+
+bool wxStaticBoxSizer::CheckIfNonBoxChild(wxWindow* win) const
+{
+    if ( m_staticBox->IsDescendant(win) )
+        return false;
+
+    // Warn if the window is not a child of the static box, which it really
+    // should be, even if we still support using the box parent as parent
+    // too for compatibility.
+    wxLogDebug("Element %s of wxStaticBoxSizer should be created "
+               "as child of its wxStaticBox and not of %s.",
+               wxDumpWindow(win),
+               wxDumpWindow(win->GetParent()));
+
+#if defined(__WXMSW__) && !defined(__WXUNIVERSAL__)
+    // Additionally, under MSW the windows inside a static box are not
+    // drawn at all when compositing is used, so we have to disable it.
+    //
+    // An alternative could be to Reparent() the window to the static
+    // box, but it might break the existing code and as we only allow
+    // this for compatibility in the first place, it seems better not
+    // to risk it.
+    win->MSWDisableComposited();
+#endif // __WXMSW__ && !__WXUNIVERSAL__
+
+    return true;
+}
+
+wxSizerItem* wxStaticBoxSizer::DoInsert(size_t index, wxSizerItem* item)
+{
+    if ( wxWindow* const win = item->GetWindow() )
+    {
+        // We can check immediately if we have any non-box children and
+        // it's better to do it here, for example to allow putting a
+        // breakpoint on wxLogDebug() message above and immediately seeing
+        // where the item is inserted from, if it's not clear otherwise.
+        if ( CheckIfNonBoxChild(win) )
+            m_hasNonBoxChildren = true;
+    }
+
+    return wxBoxSizer::DoInsert(index, item);
+}
+
 void wxStaticBoxSizer::RepositionChildren(const wxSize& minSize)
 {
     int top_border, other_border;
@@ -2644,9 +2798,17 @@ void wxStaticBoxSizer::RepositionChildren(const wxSize& minSize)
     m_size.y -= top_border + other_border;
 
     wxPoint old_pos( m_position );
-    if (m_staticBox->GetChildren().GetCount() > 0)
+
+    // If we didn't have any sibling children so far, but we don't have any
+    // real children either, chances are that they could have been added, so
+    // check for this (but if we do have real children, don't bother doing
+    // anything as this would result in extra overhead for every re-layout).
+    if ( !m_hasNonBoxChildren && m_staticBox->GetChildren().empty() )
+        m_hasNonBoxChildren = CheckForNonBoxChildren(this);
+
+    if ( !m_hasNonBoxChildren )
     {
-#if defined( __WXGTK20__ )
+#if defined( __WXGTK__ )
         // if the wxStaticBox has created a wxPizza to contain its children
         // (see wxStaticBox::AddChild) then we need to place the items it contains
         // in the base class version called below using coordinates relative
@@ -2672,6 +2834,30 @@ void wxStaticBoxSizer::RepositionChildren(const wxSize& minSize)
         // case we need to position them with coordinates relative to our common parent
         m_position.x += other_border;
         m_position.y += top_border;
+
+        // Also check for the non-supported scenario in which both windows
+        // using box as their parent and the ones using its parent are used:
+        // this won't work correctly because the latter ones won't use the
+        // required offset and so won't be laid out correctly, see the code
+        // dealing with m_position in RepositionChildren() below.
+        if ( !m_staticBox->GetChildren().empty() )
+        {
+            wxASSERT_MSG
+            (
+                !m_hasNonBoxChildren,
+                "All items of wxStaticBoxSizer must use the same parent.\n"
+                "\n"
+                "It is strongly recommended to use the associated static box "
+                "as the parent for all of them, but if not, all items must "
+                "use the containing window as parent.\n"
+                "\n"
+                "Mixing items using different parents inside the same sizer "
+                "is NOT supported."
+            );
+
+            // One assert is enough, so reset it to avoid giving it again.
+            m_hasNonBoxChildren = false;
+        }
     }
 
     wxBoxSizer::RepositionChildren(minSize);
@@ -2715,14 +2901,14 @@ bool wxStaticBoxSizer::AreAnyItemsShown() const
     return m_staticBox->IsShown();
 }
 
-bool wxStaticBoxSizer::Detach( wxWindow *window )
+bool wxStaticBoxSizer::Detach( wxWindowBase *window )
 {
     // avoid deleting m_staticBox in our dtor if it's being detached from the
     // sizer (which can happen because it's being already destroyed for
     // example)
     if ( window == m_staticBox )
     {
-        m_staticBox = NULL;
+        m_staticBox = nullptr;
         return true;
     }
 
@@ -2746,11 +2932,11 @@ wxStdDialogButtonSizer::wxStdDialogButtonSizer()
     if (is_pda)
         m_orient = wxVERTICAL;
 
-    m_buttonAffirmative = NULL;
-    m_buttonApply = NULL;
-    m_buttonNegative = NULL;
-    m_buttonCancel = NULL;
-    m_buttonHelp = NULL;
+    m_buttonAffirmative = nullptr;
+    m_buttonApply = nullptr;
+    m_buttonNegative = nullptr;
+    m_buttonCancel = nullptr;
+    m_buttonHelp = nullptr;
 }
 
 void wxStdDialogButtonSizer::AddButton(wxButton *mybutton)
@@ -2804,7 +2990,7 @@ void wxStdDialogButtonSizer::Realize()
     {
     public:
         TabOrderUpdater()
-            : m_lastAdded(NULL)
+            : m_lastAdded(nullptr)
         {
         }
 
@@ -2874,7 +3060,7 @@ void wxStdDialogButtonSizer::Realize()
 
         // Extra space around and at the right
         Add(12, 40);
-#elif defined(__WXGTK20__)
+#elif defined(__WXGTK__)
         // http://library.gnome.org/devel/hig-book/stable/windows-alert.html.en
         // says that the correct button order is
         //

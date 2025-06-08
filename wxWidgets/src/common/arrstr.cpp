@@ -2,7 +2,6 @@
 // Name:        src/common/arrstr.cpp
 // Purpose:     wxArrayString class
 // Author:      Vadim Zeitlin
-// Modified by:
 // Created:     29/01/98
 // Copyright:   (c) 1998 Vadim Zeitlin <zeitlin@dptmaths.ens-cachan.fr>
 // Licence:     wxWindows licence
@@ -25,48 +24,22 @@
 #include <functional>
 #include "wx/afterstd.h"
 
-#if defined( __WINDOWS__ )
-    #include <shlwapi.h>
-
-    // In some distributions of MinGW32, this function is exported in the library,
-    // but not declared in shlwapi.h. Therefore we declare it here.
-    #if defined( __MINGW32_TOOLCHAIN__ )
-        extern "C" __declspec(dllimport) int WINAPI StrCmpLogicalW(LPCWSTR psz1, LPCWSTR psz2);
-    #endif
-
-    // For MSVC we can also link the library containing StrCmpLogicalW()
-    // directly from here, for the other compilers this needs to be done at
-    // makefiles level.
-    #ifdef __VISUALC__
-        #pragma comment(lib, "shlwapi")
-    #endif
-#endif
-
 // ============================================================================
 // ArrayString
 // ============================================================================
 
 wxArrayString::wxArrayString(size_t sz, const char** a)
 {
-#if !wxUSE_STD_CONTAINERS
-    Init(false);
-#endif
     assign(a, a + sz);
 }
 
 wxArrayString::wxArrayString(size_t sz, const wchar_t** a)
 {
-#if !wxUSE_STD_CONTAINERS
-    Init(false);
-#endif
     assign(a, a + sz);
 }
 
 wxArrayString::wxArrayString(size_t sz, const wxString* a)
 {
-#if !wxUSE_STD_CONTAINERS
-    Init(false);
-#endif
     assign(a, a + sz);
 }
 
@@ -74,108 +47,36 @@ wxArrayString::wxArrayString(size_t sz, const wxString* a)
 
 #include "wx/arrstr.h"
 
-#if __cplusplus >= 201103L || wxCHECK_VISUALC_VERSION(14)
-
-int wxArrayString::Index(const wxString& str, bool bCase, bool WXUNUSED(bFromEnd)) const
+int wxArrayString::Index(const wxString& str, bool bCase, bool bFromEnd) const
 {
     int n = 0;
-    for ( const auto& s: *this )
+    if (!bFromEnd)
     {
-        if ( s.IsSameAs(str, bCase) )
-            return n;
+        for ( const auto& s: *this )
+        {
+            if ( s.IsSameAs(str, bCase) )
+                return n;
 
-        ++n;
+            ++n;
+        }
+    }
+    else
+    {
+        for( n = size()-1; n >= 0; --n )
+            if ((*this)[n].IsSameAs(str, bCase))
+                return n;
     }
 
     return wxNOT_FOUND;
 }
 
-#else // C++98 version
-
-#include "wx/beforestd.h"
-#include <functional>
-#include "wx/afterstd.h"
-
-// some compilers (Sun CC being the only known example) distinguish between
-// extern "C" functions and the functions with C++ linkage and ptr_fun and
-// wxStringCompareLess can't take wxStrcmp/wxStricmp directly as arguments in
-// this case, we need the wrappers below to make this work
-struct wxStringCmp
-{
-    typedef wxString first_argument_type;
-    typedef wxString second_argument_type;
-    typedef int result_type;
-
-    int operator()(const wxString& s1, const wxString& s2) const
-    {
-        return s1.compare(s2);
-    }
-};
-
-struct wxStringCmpNoCase
-{
-    typedef wxString first_argument_type;
-    typedef wxString second_argument_type;
-    typedef int result_type;
-
-    int operator()(const wxString& s1, const wxString& s2) const
-    {
-        return s1.CmpNoCase(s2);
-    }
-};
-
-int wxArrayString::Index(const wxString& str, bool bCase, bool WXUNUSED(bFromEnd)) const
-{
-    wxArrayString::const_iterator it;
-
-    if (bCase)
-    {
-        it = std::find_if(begin(), end(),
-                          std::not1(
-                              std::bind2nd(
-                                  wxStringCmp(), str)));
-    }
-    else // !bCase
-    {
-        it = std::find_if(begin(), end(),
-                          std::not1(
-                              std::bind2nd(
-                                  wxStringCmpNoCase(), str)));
-    }
-
-    return it == end() ? wxNOT_FOUND : it - begin();
-}
-
-template<class F>
-class wxStringCompareLess
-{
-public:
-    wxStringCompareLess(F f) : m_f(f) { }
-    bool operator()(const wxString& s1, const wxString& s2)
-        { return m_f(s1, s2) < 0; }
-private:
-    F m_f;
-};
-
-template<class F>
-wxStringCompareLess<F> wxStringCompare(F f)
-{
-    return wxStringCompareLess<F>(f);
-}
-
-#endif // C++11/C++98
-
 void wxArrayString::Sort(CompareFunction function)
 {
     std::sort(begin(), end(),
-#if __cplusplus >= 201103L || wxCHECK_VISUALC_VERSION(14)
               [function](const wxString& s1, const wxString& s2)
               {
                   return function(s1, s2) < 0;
               }
-#else // C++98 version
-              wxStringCompare(function)
-#endif // C++11/C++98
              );
 }
 
@@ -201,14 +102,10 @@ int wxSortedArrayString::Index(const wxString& str,
     SCMPFUNC function = GetCompareFunction();
     wxSortedArrayString::const_iterator
         it = std::lower_bound(begin(), end(), str,
-#if __cplusplus >= 201103L || wxCHECK_VISUALC_VERSION(14)
                               [function](const wxString& s1, const wxString& s2)
                               {
                                   return function(s1, s2) < 0;
                               }
-#else // C++98 version
-                              wxStringCompare(function)
-#endif // C++11/C++98
                               );
 
     if ( it == end() || str.Cmp(*it) != 0 )
@@ -223,20 +120,11 @@ int wxSortedArrayString::Index(const wxString& str,
 #define   ARRAY_DEFAULT_INITIAL_SIZE    (16)
 #endif
 
-// ctor
-void wxArrayString::Init(bool autoSort)
-{
-  m_nSize  =
-  m_nCount = 0;
-  m_pItems = NULL;
-  m_compareFunction = NULL;
-  m_autoSort = autoSort;
-}
-
 // copy ctor
 wxArrayString::wxArrayString(const wxArrayString& src)
 {
-  Init(src.m_autoSort);
+  if ( src.m_autoSort )
+      m_autoSort = true;
 
   *this = src;
 }
@@ -261,6 +149,14 @@ wxArrayString& wxArrayString::operator=(const wxArrayString& src)
   return *this;
 }
 
+std::vector<wxString> wxArrayString::AsVector() const
+{
+    if ( !m_pItems )
+        return {};
+
+    return std::vector<wxString>{m_pItems, m_pItems + m_nCount};
+}
+
 void wxArrayString::Copy(const wxArrayString& src)
 {
   if ( src.m_nCount > ARRAY_DEFAULT_INITIAL_SIZE )
@@ -276,7 +172,7 @@ wxString *wxArrayString::Grow(size_t nIncrement)
     if ( (m_nSize - m_nCount) >= nIncrement )
     {
         // We already have enough space.
-        return NULL;
+        return nullptr;
     }
 
     // if ARRAY_DEFAULT_INITIAL_SIZE were set to 0, the initially empty would
@@ -293,7 +189,7 @@ wxString *wxArrayString::Grow(size_t nIncrement)
       m_pItems = new wxString[m_nSize];
 
       // Nothing to free, we hadn't had any memory before.
-      return NULL;
+      return nullptr;
     }
     else {
       // otherwise when it's called for the first time, nIncrement would be 0
@@ -672,7 +568,7 @@ wxString wxJoin(const wxArrayString& arr, const wxChar sep, const wxChar escape)
                   i != end;
                   ++i )
             {
-                const wxChar ch = *i;
+                const wxUniChar ch = *i;
                 if ( ch == sep )
                     str += escape;      // escape this separator
                 str += ch;
@@ -700,7 +596,7 @@ wxArrayString wxSplit(const wxString& str, const wxChar sep, const wxChar escape
           i != end;
           ++i )
     {
-        const wxChar ch = *i;
+        const wxUniChar ch = *i;
 
         // Order of tests matters here in the uncommon, but possible, case when
         // the separator is the same as the escape character: it has to be
@@ -912,15 +808,13 @@ int wxCMPFUNC_CONV wxCmpNaturalGeneric(const wxString& s1, const wxString& s2)
 // ----------------------------------------------------------------------------
 // wxCmpNatural
 // ----------------------------------------------------------------------------
-//
-// If a native version of Natural sort is available, then use that, otherwise
-// use the generic version.
+
+// If native natural sort function isn't available, use the generic version.
+#if !(defined(__WINDOWS__) || defined(__DARWIN__) || defined(__WXOSX_IPHONE__))
+
 int wxCMPFUNC_CONV wxCmpNatural(const wxString& s1, const wxString& s2)
 {
-#if defined( __WINDOWS__ )
-    return StrCmpLogicalW(s1.wc_str(), s2.wc_str());
-#else
     return wxCmpNaturalGeneric(s1, s2);
-#endif // #if defined( __WINDOWS__ )
 }
 
+#endif // not a platform with native implementation

@@ -2,7 +2,6 @@
 // Name:        src/osx/bmpbuttn_osx.cpp
 // Purpose:     wxBitmapButton
 // Author:      Stefan Csomor
-// Modified by:
 // Created:     1998-01-01
 // Copyright:   (c) Stefan Csomor
 // Licence:     wxWindows licence
@@ -25,7 +24,7 @@
 
 bool wxBitmapButton::Create( wxWindow *parent,
                              wxWindowID id,
-                             const wxBitmap& bitmap,
+                             const wxBitmapBundle& bitmap,
                              const wxPoint& pos,
                              const wxSize& size,
                              long style,
@@ -58,7 +57,7 @@ wxSize wxBitmapButton::DoGetBestSize() const
 
     if ( GetBitmapLabel().IsOk() )
     {
-        const wxSize bitmapSize = GetBitmapLabel().GetScaledSize();
+        const wxSize bitmapSize = GetBitmapLabel().GetLogicalSize();
         best += bitmapSize;
 
         // The NSRoundedBezelStyle and NSTexturedRoundedBezelStyle used when

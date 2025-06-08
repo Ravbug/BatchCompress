@@ -2,7 +2,6 @@
 // Name:        src/msw/regconf.cpp
 // Purpose:
 // Author:      Vadim Zeitlin
-// Modified by:
 // Created:     27.04.98
 // Copyright:   (c) 1998 Vadim Zeitlin <zeitlin@dptmaths.ens-cachan.fr>
 // Licence:     wxWindows licence
@@ -271,7 +270,7 @@ void wxRegConfig::SetPath(const wxString& strPath)
                     if ( !totalSlashes )
                     {
                         wxLogWarning(_("'%s' has extra '..', ignored."),
-                                     strFullPath.c_str());
+                                     strFullPath);
                     }
                     else // return to the previous path component
                     {
@@ -571,7 +570,7 @@ wxConfigBase::EntryType wxRegConfig::GetEntryType(const wxString& key) const
 template <typename T>
 bool wxRegConfig::DoReadValue(const wxString& key, T* pValue) const
 {
-    wxCHECK_MSG( pValue, false, wxT("wxRegConfig::Read(): NULL param") );
+  wxCHECK_MSG( pValue, false, wxT("wxRegConfig::Read(): null param") );
 
   wxConfigPathChanger path(this, key);
 
@@ -583,7 +582,7 @@ bool wxRegConfig::DoReadValue(const wxString& key, T* pValue) const
     if ( TryGetValue(m_keyGlobal, path.Name(), pValue) ) {
       if ( m_keyLocal.Exists() && LocalKey().HasValue(path.Name()) ) {
         wxLogWarning(wxT("User value for immutable key '%s' ignored."),
-                   path.Name().c_str());
+                   path.Name());
       }
 
       return true;
@@ -631,7 +630,7 @@ bool wxRegConfig::DoWriteValue(const wxString& key, const T& value)
   wxConfigPathChanger path(this, key);
 
   if ( IsImmutable(path.Name()) ) {
-    wxLogError(wxT("Can't change immutable entry '%s'."), path.Name().c_str());
+    wxLogError(wxT("Can't change immutable entry '%s'."), path.Name());
     return false;
   }
 

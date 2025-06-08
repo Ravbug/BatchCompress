@@ -2,7 +2,6 @@
 // Name:        src/common/module.cpp
 // Purpose:     Modules initialization/destruction
 // Author:      Wolfram Gloger/adapted by Guilhem Lavaux
-// Modified by:
 // Created:     04/11/98
 // Copyright:   (c) Wolfram Gloger and Guilhem Lavaux
 // Licence:     wxWindows licence
@@ -15,14 +14,13 @@
 #include "wx/module.h"
 
 #ifndef WX_PRECOMP
-    #include "wx/hash.h"
     #include "wx/intl.h"
     #include "wx/log.h"
 #endif
 
 #define TRACE_MODULE wxT("module")
 
-wxIMPLEMENT_ABSTRACT_CLASS(wxModule, wxObject)
+wxIMPLEMENT_ABSTRACT_CLASS(wxModule, wxObject);
 
 wxModuleList wxModule::ms_modules;
 bool wxModule::ms_areInitialized = false;

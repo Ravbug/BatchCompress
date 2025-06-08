@@ -14,6 +14,13 @@ enum
     wxUSER_ATTENTION_ERROR = 2  ///< Results in a more drastic action.
 };
 
+// Values for wxTopLevelWindow::GetContentProtection() and wxTopLevelWindow::SetContentProtection()
+enum wxContentProtection
+{
+    wxCONTENT_PROTECTION_NONE,   ///< Window contents are visible in screen captures
+    wxCONTENT_PROTECTION_ENABLED ///< Window contents are not visible in screen captures
+};
+
 /**
     Styles used with wxTopLevelWindow::ShowFullScreen().
 */
@@ -53,7 +60,7 @@ enum
     internal top level window list.
 
     @beginEventEmissionTable
-    @event{EVT_MAXIMIZE(id, func)}
+    @event{EVT_MAXIMIZE(func)}
         Process a @c wxEVT_MAXIMIZE event. See wxMaximizeEvent.
     @event{EVT_MOVE(func)}
         Process a @c wxEVT_MOVE event, which is generated when a window is moved.
@@ -68,7 +75,7 @@ enum
         See wxMoveEvent.
     @event{EVT_SHOW(func)}
         Process a @c wxEVT_SHOW event. See wxShowEvent.
-    @event{EVT_FULLSCREEN(id, func)}
+    @event{EVT_FULLSCREEN(func)}
         Process a @c wxEVT_FULLSCREEN event. See wxFullScreenEvent.
     @endEventTable
 
@@ -185,7 +192,7 @@ public:
 
     /**
         Returns a pointer to the button which is the default for this window, or
-        @c @NULL. The default button is the one activated by pressing the Enter
+        @NULL. The default button is the one activated by pressing the Enter
         key.
     */
     wxWindow* GetDefaultItem() const;
@@ -239,7 +246,7 @@ public:
         @param iconize
             If @true, iconizes the window; if @false, shows and restores it.
 
-        @see IsIconized(), Restore()(), wxIconizeEvent.
+        @see IsIconized(), Restore(), wxIconizeEvent.
     */
     virtual void Iconize(bool iconize = true);
 
@@ -297,7 +304,7 @@ public:
         Note that if you associate a sizer with this window, the sizer takes
         precedence and the only-child-resizing is only used as fallback.
 
-        @returns @false if nothing was done because the window doesn't have
+        @returns @false if nothing was done because the window has
                  neither a sizer nor a single child, @true otherwise.
     */
     virtual bool Layout();
@@ -319,7 +326,7 @@ public:
         MSW-specific function for accessing the system menu.
 
         Returns a wxMenu pointer representing the system menu of the window
-        under MSW. The returned wxMenu may be used, if non-@c NULL, to add
+        under MSW. The returned wxMenu may be used, if non-null, to add
         extra items to the system menu. The usual @c wxEVT_MENU
         events (that can be processed using @c EVT_MENU event table macro) will
         then be generated for them. All the other wxMenu methods may be used as
@@ -414,7 +421,7 @@ public:
             other values.
 
             @param name uniquely identifies the field
-            @param value non-@NULL pointer to the value to be filled by this
+            @param value non-null pointer to the value to be filled by this
                 function
 
             @return @true if the value was retrieved or @false if it wasn't
@@ -529,9 +536,9 @@ public:
         @param maxH
             The maximum height.
         @param incW
-            Specifies the increment for sizing the width (GTK/Motif/Xt only).
+            Specifies the increment for sizing the width (GTK/X11 only).
         @param incH
-            Specifies the increment for sizing the height (GTK/Motif/Xt only).
+            Specifies the increment for sizing the height (GTK/X11 only).
 
         @remarks Notice that this function not only prevents the user from
                  resizing the window outside the given bounds but it also
@@ -554,7 +561,7 @@ public:
             The maximum size of the window.
         @param incSize
             Increment size (only taken into account under X11-based ports such
-            as wxGTK/wxMotif/wxX11).
+            as wxGTK and wxX11).
 
         @remarks Notice that this function not only prevents the user from
                  resizing the window outside the given bounds but it also
@@ -577,6 +584,13 @@ public:
 
     /**
         If the platform supports it will set the window to be translucent.
+
+        Note that in wxGTK this function must be called before the window is
+        shown the first time it's called (but it can be called again after
+        showing the window too).
+
+        See @ref page_samples_shaped "the shaped sample" for an example of
+        using this function.
 
         @param alpha
             Determines how opaque or transparent the window will be, if the
@@ -642,6 +656,10 @@ public:
         @param enable
             If @true (default) make the zoom button toggle full screen;
             if @false the button does only toggle zoom.
+        @param style
+            This parameter sets which elements will be hidden when the
+            user presses the full screen button. See ShowFullScreen()
+            for possible values. It is available since wxWidgets 3.1.6.
 
         @return @true if the button behaviour has been changed, @false if running
         under another OS.
@@ -651,6 +669,8 @@ public:
         and entering and exiting the mode is animated.
         If the button is not present the old way of switching to full screen
         is used.
+        Only @c ::wxFULLSCREEN_NOTOOLBAR and @c ::wxFULLSCREEN_NOMENUBAR will be
+        used when using the fullscreen API (other values are ignored).
 
         @onlyfor{wxosx}
 
@@ -658,7 +678,7 @@ public:
 
         @since 3.1.0
     */
-    virtual bool EnableFullScreenView(bool enable = true);
+    virtual bool EnableFullScreenView(bool enable = true, long style = wxFULLSCREEN_ALL);
 
     /**
         Depending on the value of @a show parameter the window is either shown
@@ -681,6 +701,39 @@ public:
         @see EnableFullScreenView(), IsFullScreen()
     */
     virtual bool ShowFullScreen(bool show, long style = wxFULLSCREEN_ALL);
+
+    /**
+        Get the current content protection of the window.
+
+        @see SetContentProtection()
+
+        @since 3.1.6
+    */
+    virtual wxContentProtection GetContentProtection() const;
+
+    /**
+        Set content protection for the window.
+
+        When content protection is enabled contents of this window will not
+        be included in screen captures.
+
+        Obviously this can't provide absolute security as there might be
+        workarounds and tools that bypass this protection. Additionally a
+        screen could always be photographed.
+
+        @return @true if the content protection was changed, @false if running
+        under an unsupported OS.
+
+        @note Windows 7 or newer is required but any macOS version is supported.
+
+        @onlyfor{wxmsw,wxosx}
+
+        @see GetContentProtection()
+
+        @since 3.1.6
+    */
+    virtual bool SetContentProtection(wxContentProtection contentProtection);
+
 
     /**
         This method is specific to wxUniversal port.

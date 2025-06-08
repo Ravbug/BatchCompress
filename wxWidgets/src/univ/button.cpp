@@ -2,7 +2,6 @@
 // Name:        src/univ/button.cpp
 // Purpose:     wxButton
 // Author:      Vadim Zeitlin
-// Modified by:
 // Created:     14.08.00
 // Copyright:   (c) 2000 SciTech Software, Inc. (www.scitechsoft.com)
 // Licence:     wxWindows licence
@@ -54,7 +53,7 @@ void wxButton::Init()
 
 bool wxButton::Create(wxWindow *parent,
                       wxWindowID id,
-                      const wxBitmap& bitmap,
+                      const wxBitmapBundle& bitmap,
                       const wxString &lbl,
                       const wxPoint &pos,
                       const wxSize &size,
@@ -148,12 +147,12 @@ wxBitmap wxButton::DoGetBitmap(State WXUNUSED(which)) const
     return m_bitmap;
 }
 
-void wxButton::DoSetBitmap(const wxBitmap& bitmap, State which)
+void wxButton::DoSetBitmap(const wxBitmapBundle& bitmap, State which)
 {
     // we support only one bitmap right now, although this wouldn't be
     // difficult to change
     if ( which == State_Normal )
-        m_bitmap = bitmap;
+        m_bitmap = bitmap.GetBitmap(wxDefaultSize); // TODO-HIDPI
 
     SetBitmapMargins(DEFAULT_BTN_MARGIN_X, DEFAULT_BTN_MARGIN_Y);
 }

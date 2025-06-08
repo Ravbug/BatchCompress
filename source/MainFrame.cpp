@@ -19,7 +19,7 @@
 
 #define DISPATCH_EVT 5000
 
-constexpr static char* const version = "1.1";
+constexpr static char* const version = "1.2";
 
 wxDEFINE_EVENT(dispatchEvt, wxCommandEvent);
 

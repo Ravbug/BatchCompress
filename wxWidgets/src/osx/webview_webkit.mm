@@ -3,7 +3,6 @@
 // Purpose:     wxWebViewWebKit - embeddable web kit control,
 //                             OS X implementation of web view component
 // Author:      Jethro Grassie / Kevin Ollivier / Marianne Gagnon
-// Modified by:
 // Created:     2004-4-16
 // Copyright:   (c) Jethro Grassie / Kevin Ollivier / Marianne Gagnon
 // Licence:     wxWindows licence
@@ -24,27 +23,25 @@
 
 #include "wx/osx/private.h"
 #include "wx/osx/core/cfref.h"
+#include "wx/osx/cocoa/private/date.h"
 #include "wx/osx/private/available.h"
 #include "wx/private/jsscriptwrapper.h"
+#include "wx/private/webview.h"
 
-#include "wx/hashmap.h"
 #include "wx/filesys.h"
 #include "wx/msgdlg.h"
+#include "wx/mstream.h"
 #include "wx/textdlg.h"
 #include "wx/filedlg.h"
 
 #include <WebKit/WebKit.h>
 #include <Foundation/NSURLError.h>
 
-// using native types to get compile errors and warnings
-
-#define DEBUG_WEBKIT_SIZING 0
+using namespace wxOSXImpl;
 
 // ----------------------------------------------------------------------------
 // macros
 // ----------------------------------------------------------------------------
-
-wxIMPLEMENT_DYNAMIC_CLASS(wxWebViewWebKit, wxWebView);
 
 wxBEGIN_EVENT_TABLE(wxWebViewWebKit, wxControl)
 wxEND_EVENT_TABLE()
@@ -55,6 +52,8 @@ wxEND_EVENT_TABLE()
 }
 
 - (void)setWebView:(wxWebViewWebKit*)webView;
+
+- (void)doCommandBySelector:(SEL)aSelector;
 
 @end
 
@@ -97,19 +96,150 @@ wxEND_EVENT_TABLE()
 @end
 
 //-----------------------------------------------------------------------------
+// wxWebViewConfigurationImplWebKit
+//-----------------------------------------------------------------------------
+class wxWebViewConfigurationImplWebKit: public wxWebViewConfigurationImpl
+{
+public:
+    wxWebViewConfigurationImplWebKit(WKWebViewConfiguration* config):
+        m_webViewConfiguration([config retain])
+    {
+    }
+
+    ~wxWebViewConfigurationImplWebKit()
+    {
+        [m_webViewConfiguration release];
+    }
+
+    virtual void* GetNativeConfiguration() const override
+    {
+        return m_webViewConfiguration;
+    }
+
+    virtual bool EnablePersistentStorage(bool enable) override
+    {
+        m_webViewConfiguration.websiteDataStore =
+            enable ?
+                [WKWebsiteDataStore defaultDataStore] :
+                [WKWebsiteDataStore nonPersistentDataStore];
+
+        return true;
+    }
+
+    WKWebViewConfiguration* m_webViewConfiguration;
+};
+
+//-----------------------------------------------------------------------------
 // wxWebViewFactoryWebKit
 //-----------------------------------------------------------------------------
 
-wxVersionInfo wxWebViewFactoryWebKit::GetVersionInfo()
+wxVersionInfo wxWebViewFactoryWebKit::GetVersionInfo(wxVersionContext context)
 {
-    int verMaj, verMin, verMicro;
-    wxGetOsVersion(&verMaj, &verMin, &verMicro);
-    return wxVersionInfo("WKWebView", verMaj, verMin, verMicro);
+    switch ( context )
+    {
+        case wxVersionContext::BuildTime:
+            // There is no build-time version for this backend.
+            break;
+
+        case wxVersionContext::RunTime:
+            int verMaj, verMin, verMicro;
+            wxGetOsVersion(&verMaj, &verMin, &verMicro);
+            return wxVersionInfo("WKWebView", verMaj, verMin, verMicro);
+    }
+
+    return {};
 }
+
+wxWebViewConfiguration wxWebViewFactoryWebKit::CreateConfiguration()
+{
+    return wxWebViewConfiguration(wxWebViewBackendWebKit,
+        new wxWebViewConfigurationImplWebKit([[WKWebViewConfiguration alloc] init]));
+}
+
+//-----------------------------------------------------------------------------
+// wxWebViewWindowFeaturesWebKit
+//-----------------------------------------------------------------------------
+
+class wxWebViewWindowFeaturesWebKit: public wxWebViewWindowFeatures
+{
+public:
+    wxWebViewWindowFeaturesWebKit(wxWebView* childWebView,
+                                    WKWebViewConfiguration* configuration,
+                                    WKNavigationAction* navigationAction,
+                                    WKWindowFeatures* windowFeatures):
+        wxWebViewWindowFeatures(childWebView),
+        m_configuration(configuration),
+        m_navigationAction(navigationAction),
+        m_windowFeatures(windowFeatures)
+    {
+
+    }
+
+    virtual wxPoint GetPosition() const override
+    {
+        wxPoint pos(-1, -1);
+        if (m_windowFeatures.y)
+            pos.y = m_windowFeatures.y.intValue;
+        if (m_windowFeatures.x)
+            pos.x = m_windowFeatures.x.intValue;
+
+        return pos;
+    }
+
+    virtual wxSize GetSize() const override
+    {
+        wxSize size(-1, -1);
+        if (m_windowFeatures.height)
+            size.y = m_windowFeatures.height.intValue;
+        if (m_windowFeatures.width)
+            size.x = m_windowFeatures.width.intValue;
+        return size;
+    }
+
+    virtual bool ShouldDisplayMenuBar() const override
+    {
+        if (m_windowFeatures.menuBarVisibility)
+            return m_windowFeatures.menuBarVisibility.boolValue;
+        else
+            return true;
+    }
+
+    virtual bool ShouldDisplayStatusBar() const override
+    {
+        if (m_windowFeatures.statusBarVisibility)
+            return m_windowFeatures.statusBarVisibility.boolValue;
+        else
+            return true;
+    }
+
+    virtual bool ShouldDisplayToolBar() const override
+    {
+        if (m_windowFeatures.toolbarsVisibility)
+            return m_windowFeatures.toolbarsVisibility.boolValue;
+        else
+            return true;
+    }
+
+    virtual bool ShouldDisplayScrollBars() const override
+    {
+        return true;
+    }
+
+    WKWebViewConfiguration* m_configuration;
+    WKNavigationAction* m_navigationAction;
+    WKWindowFeatures* m_windowFeatures;
+};
+
 
 // ----------------------------------------------------------------------------
 // creation/destruction
 // ----------------------------------------------------------------------------
+
+wxWebViewWebKit::wxWebViewWebKit(const wxWebViewConfiguration& config, WX_NSObject request):
+    m_configuration(config),
+    m_request(request)
+{
+}
 
 bool wxWebViewWebKit::Create(wxWindow *parent,
                                  wxWindowID winID,
@@ -121,23 +251,20 @@ bool wxWebViewWebKit::Create(wxWindow *parent,
     DontCreatePeer();
     wxControl::Create(parent, winID, pos, size, style, wxDefaultValidator, name);
 
+    bool isChildWebView = m_request != nil;
+
     NSRect r = wxOSXGetFrameForControl( this, pos , size ) ;
-    WKWebViewConfiguration* webViewConfig = [[WKWebViewConfiguration alloc] init];
+    WKWebViewConfiguration* webViewConfig = (WKWebViewConfiguration*) m_configuration.GetNativeConfiguration();
 
-    // WebKit API available since macOS 10.11 and iOS 9.0
-    SEL fullScreenSelector = @selector(_setFullScreenEnabled:);
-    if ([webViewConfig.preferences respondsToSelector:fullScreenSelector])
-        [webViewConfig.preferences performSelector:fullScreenSelector withObject:[NSNumber numberWithBool:YES]];
-
-    if (!m_handlers.empty())
+    if (!m_handlers.empty() && !isChildWebView)
     {
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_13
         if ( WX_IS_MACOS_AVAILABLE(10, 13) )
         {
-            for (wxStringToWebHandlerMap::iterator it = m_handlers.begin(); it != m_handlers.end(); it++)
+            for (const auto& kv : m_handlers)
             {
-                [webViewConfig setURLSchemeHandler:[[WebViewCustomProtocol alloc] initWithHandler:it->second.get()]
-                                            forURLScheme:wxCFStringRef(it->first).AsNSString()];
+                [webViewConfig setURLSchemeHandler:[[WebViewCustomProtocol alloc] initWithHandler:kv.second.get()]
+                                            forURLScheme:wxCFStringRef(kv.first).AsNSString()];
             }
         }
         else
@@ -171,14 +298,53 @@ bool wxWebViewWebKit::Create(wxWindow *parent,
 
     [m_webView setUIDelegate:uiDelegate];
 
-    // WebKit API available since macOS 10.13 and iOS 11.0
-    SEL fullScreenDelegateSelector = @selector(_setFullscreenDelegate:);
-    if ([m_webView respondsToSelector:fullScreenDelegateSelector])
-        [m_webView performSelector:fullScreenDelegateSelector withObject:uiDelegate];
+    if (!isChildWebView)
+    {
+        // Implement javascript fullscreen interface with user script and message handler
+        AddUserScript("\
+            document.__wxToggleFullscreen = function (elem) { \
+                if (!document.__wxStylesAdded) { \
+                    function createClass(name,rules) { \
+                        var style= document.createElement('style'); style.type = 'text/css'; \
+                        document.getElementsByTagName('head')[0].appendChild(style); \
+                        style.sheet.addRule(name, rules); \
+                    } \
+                    createClass(\"body.wxfullscreen\", \"padding: 0; margin: 0; height: 100%;\"); \
+                    createClass(\".wxfullscreen\", \"position: fixed; overflow: hidden; z-index: 1000; left: 0; top: 0; bottom: 0; right: 0;\"); \
+                    createClass(\".wxfullscreenelem\", \"width: 100% !important; height: 100% !important; padding-top: 0 !important;\"); \
+                    document.__wxStylesAdded = true; \
+                } \
+                if (elem) { \
+                    elem.classList.add(\"wxfullscreen\"); \
+                    elem.classList.add(\"wxfullscreenelem\"); \
+                    document.body.classList.add(\"wxfullscreen\"); \
+                } else if (document.webkitFullscreenElement) { \
+                    document.webkitFullscreenElement.classList.remove(\"wxfullscreen\"); \
+                    document.webkitFullscreenElement.classList.remove(\"wxfullscreenelem\"); \
+                    document.body.classList.remove(\"wxfullscreen\"); \
+                } \
+                document.webkitFullscreenElement = elem; \
+                window.webkit.messageHandlers.__wxfullscreen.postMessage((elem) ? 1: 0); \
+                document.dispatchEvent(new Event('webkitfullscreenchange')); \
+                if (document.onwebkitfullscreenchange) document.onwebkitfullscreenchange(); \
+            }; \
+            Element.prototype.webkitRequestFullscreen = function() {document.__wxToggleFullscreen(this);}; \
+            document.webkitExitFullscreen = function() {document.__wxToggleFullscreen(undefined);}; \
+            document.onwebkitfullscreenchange = null; \
+            document.webkitFullscreenEnabled = true; \
+        ");
+        [m_webView.configuration.userContentController addScriptMessageHandler:
+            [[WebViewScriptMessageHandler alloc] initWithWxWindow:this] name:@"__wxfullscreen"];
+    }
 
     m_UIDelegate = uiDelegate;
 
-    LoadURL(strURL);
+    NotifyWebViewCreated();
+
+    if (m_request)
+        [m_webView loadRequest:(NSURLRequest*)m_request];
+    else
+        LoadURL(strURL);
     return true;
 }
 
@@ -346,6 +512,62 @@ bool wxWebViewWebKit::SetUserAgent(const wxString& userAgent)
         return false;
 }
 
+bool wxWebViewWebKit::ClearBrowsingData(int types, wxDateTime since)
+{
+    if ( WX_IS_MACOS_AVAILABLE(10, 11) )
+    {
+        // We return immediately if wxWEBVIEW_BROWSING_DATA_OTHER is specified
+        // on its own as it doesn't do anything, but we just ignore it if it is
+        // given together with something else.
+        if (types == wxWEBVIEW_BROWSING_DATA_OTHER)
+            return false;
+
+        NSSet<NSString*>* clearDataTypes = nil;
+        if (types & wxWEBVIEW_BROWSING_DATA_ALL)
+        {
+            clearDataTypes = [WKWebsiteDataStore allWebsiteDataTypes];
+        }
+        else
+        {
+            NSMutableSet<NSString*>* dataTypes = [[NSMutableSet alloc] init];
+            if (types & wxWEBVIEW_BROWSING_DATA_COOKIES)
+                [dataTypes addObject:WKWebsiteDataTypeCookies];
+            if (types & wxWEBVIEW_BROWSING_DATA_CACHE)
+                [dataTypes addObjectsFromArray:@[
+                    WKWebsiteDataTypeDiskCache,
+                    WKWebsiteDataTypeMemoryCache,
+                    WKWebsiteDataTypeOfflineWebApplicationCache
+                ]];
+            if (types & wxWEBVIEW_BROWSING_DATA_DOM_STORAGE)
+                [dataTypes addObjectsFromArray:@[
+                    WKWebsiteDataTypeLocalStorage,
+                    WKWebsiteDataTypeSessionStorage,
+                    WKWebsiteDataTypeWebSQLDatabases,
+                    WKWebsiteDataTypeIndexedDBDatabases
+                ]];
+
+            clearDataTypes = dataTypes;
+        }
+
+        // We rely on the fact that NSDateFromWX() returns nil for invalid
+        // date, as this is exactly what we want here: if the date is not
+        // specified, we pass nil to clear everything.
+        [m_webView.configuration.websiteDataStore removeDataOfTypes:clearDataTypes
+            modifiedSince:NSDateFromWX(since) completionHandler:^{
+                wxWebViewEvent event(wxEVT_WEBVIEW_BROWSING_DATA_CLEARED,
+                    GetId(),
+                    GetCurrentURL(),
+                    "");
+                event.SetInt(1);
+                ProcessWindowEvent(event);
+            }];
+
+        return true;
+    }
+    else
+        return false;
+}
+
 void wxWebViewWebKit::SetZoomType(wxWebViewZoomType zoomType)
 {
     // there is only one supported zoom type at the moment so this setter
@@ -371,76 +593,28 @@ bool wxWebViewWebKit::CanSetZoomType(wxWebViewZoomType type) const
     }
 }
 
-bool wxWebViewWebKit::RunScriptSync(const wxString& javascript, wxString* output) const
+void wxWebViewWebKit::RunScriptAsync(const wxString& javascript, void* clientData) const
 {
-    __block bool scriptExecuted = false;
-    __block wxString outputStr;
-    __block bool scriptSuccess = false;
+    wxJSScriptWrapper wrapJS(javascript, wxJSScriptWrapper::JS_OUTPUT_STRING);
 
     // Start script execution
-    [m_webView evaluateJavaScript:wxCFStringRef(javascript).AsNSString()
+    [m_webView evaluateJavaScript:wxCFStringRef(wrapJS.GetWrappedCode()).AsNSString()
                 completionHandler:^(id _Nullable obj, NSError * _Nullable error) {
         if (error)
         {
-            outputStr.assign(wxCFStringRef(error.localizedFailureReason).AsString());
+            SendScriptResult(clientData, false, wxCFStringRef(error.localizedDescription).AsString());
         }
         else
         {
-            if ([obj isKindOfClass:[NSNumber class]])
-            {
-                NSNumber* num = (NSNumber*) obj;
-                CFTypeID numID = CFGetTypeID((__bridge CFTypeRef)(num));
-                if (numID == CFBooleanGetTypeID())
-                    outputStr = num.boolValue ? "true" : "false";
-                else
-                    outputStr = wxCFStringRef::AsString(num.stringValue);
-            }
-            else if (obj)
-                outputStr.assign(wxCFStringRef::AsString([NSString stringWithFormat:@"%@", obj]));
+            wxString scriptResult;
+            if (obj)
+                scriptResult = wxCFStringRef::AsString([NSString stringWithFormat:@"%@", obj]);
+            wxString scriptOutput;
+            bool success = wxJSScriptWrapper::ExtractOutput(scriptResult, &scriptOutput);
 
-            scriptSuccess = true;
+            SendScriptResult(clientData, success, scriptOutput);
         }
-
-        scriptExecuted = true;
     }];
-
-    // Wait for script exection
-    while (!scriptExecuted)
-        wxYield();
-
-    if (output)
-        output->assign(outputStr);
-
-    return scriptSuccess;
-}
-
-bool wxWebViewWebKit::RunScript(const wxString& javascript, wxString* output) const
-{
-    wxJSScriptWrapper wrapJS(javascript, &m_runScriptCount);
-
-    // This string is also used as an error indicator: it's cleared if there is
-    // no error or used in the warning message below if there is one.
-    wxString result;
-    if (RunScriptSync(wrapJS.GetWrappedCode(), &result)
-        && result == wxS("true"))
-    {
-        if (RunScriptSync(wrapJS.GetOutputCode() + ";", &result))
-        {
-            if (output)
-                *output = result;
-            result.clear();
-        }
-
-        RunScriptSync(wrapJS.GetCleanUpCode());
-    }
-
-    if (!result.empty())
-    {
-        wxLogWarning(_("Error running JavaScript: %s"), result);
-        return false;
-    }
-
-    return true;
 }
 
 bool wxWebViewWebKit::AddScriptMessageHandler(const wxString& name)
@@ -496,12 +670,12 @@ wxString wxWebViewWebKit::GetCurrentTitle() const
 
 float wxWebViewWebKit::GetZoomFactor() const
 {
-    return m_webView.magnification;
+    return float(m_webView.magnification);
 }
 
 void wxWebViewWebKit::SetZoomFactor(float zoom)
 {
-    m_webView.magnification = zoom;
+    m_webView.magnification = double(zoom);
 }
 
 void wxWebViewWebKit::DoSetPage(const wxString& src, const wxString& baseUrl)
@@ -659,6 +833,16 @@ void wxWebViewWebKit::RegisterHandler(wxSharedPtr<wxWebViewHandler> handler)
 
     return [super performKeyEquivalent:event];
 }
+
+- (void)doCommandBySelector:(SEL)aSelector
+{
+    wxWidgetCocoaImpl* impl = (wxWidgetCocoaImpl* ) wxWidgetImpl::FindFromWXWidget( self );
+    if (aSelector != @selector(noop:))
+        [super doCommandBySelector:aSelector];
+    else if (impl)
+        impl->doCommandBySelector(aSelector, self, _cmd);
+}
+
 #endif // !defined(__WXOSX_IPHONE__)
 
 @end
@@ -787,7 +971,7 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
 
     wxString message = wxCFStringRef::AsString([error localizedDescription]);
     NSString* detail = [error localizedFailureReason];
-    if (detail != NULL)
+    if (detail != nullptr)
     {
         message = message + " (" + wxCFStringRef::AsString(detail) + ")";
     }
@@ -796,7 +980,7 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
 
 - (void)webView:(WKWebView *)webView
     didFailNavigation:(WKNavigation *)navigation
-            withError:(NSError *)error;
+            withError:(NSError *)error
 {
     if (webKitWindow){
         NSString *url = webView.URL.absoluteString;
@@ -819,7 +1003,7 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
 
 - (void)webView:(WKWebView *)webView
     didFailProvisionalNavigation:(WKNavigation *)navigation
-                       withError:(NSError *)error;
+                       withError:(NSError *)error
 {
     if (webKitWindow){
         NSString *url = webView.URL.absoluteString;
@@ -851,6 +1035,9 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
                          webKitWindow->GetId(),
                          wxCFStringRef::AsString( url ), "", navFlags);
 
+    if (navigationAction.targetFrame && navigationAction.targetFrame.isMainFrame)
+        event.SetInt(1);
+
     if (webKitWindow && webKitWindow->GetEventHandler())
         webKitWindow->GetEventHandler()->ProcessEvent(event);
 
@@ -860,6 +1047,109 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
 @end
 
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_13
+
+class wxWebViewWebKitHandlerRequest: public wxWebViewHandlerRequest
+{
+public:
+    wxWebViewWebKitHandlerRequest(NSURLRequest* request):
+        m_data(nullptr),
+        m_request(request)
+    { }
+
+    ~wxWebViewWebKitHandlerRequest()
+    { wxDELETE(m_data); }
+
+    virtual wxString GetRawURI() const override
+    { return wxCFStringRef::AsString(m_request.URL.absoluteString); }
+
+    virtual wxInputStream* GetData() const override
+    {
+        if (!m_data && m_request.HTTPBody)
+            m_data = new wxMemoryInputStream(m_request.HTTPBody.bytes, m_request.HTTPBody.length);
+
+        if (m_data)
+            m_data->SeekI(0);
+        return m_data;
+    }
+
+    virtual wxString GetMethod() const override
+    { return wxCFStringRef::AsString(m_request.HTTPMethod); }
+
+    virtual wxString GetHeader(const wxString& name) const override
+    {
+        return wxCFStringRef::AsString(
+            [m_request valueForHTTPHeaderField:wxCFStringRef(name).AsNSString()]);
+    }
+
+    mutable wxInputStream* m_data;
+    NSURLRequest* m_request;
+};
+
+class API_AVAILABLE(macos(10.13)) wxWebViewWebkitHandlerResponse: public wxWebViewHandlerResponse
+{
+public:
+    wxWebViewWebkitHandlerResponse(id<WKURLSchemeTask> task):
+        m_status(200),
+        m_task([task retain])
+    {
+        m_headers = [[NSMutableDictionary alloc] init];
+    }
+
+    ~wxWebViewWebkitHandlerResponse()
+    {
+        [m_headers release];
+        [m_task release];
+    }
+
+    virtual void SetStatus(int status) override
+    { m_status = status; }
+
+    virtual void SetContentType(const wxString& contentType) override
+    { SetHeader("Content-Type", contentType); }
+
+    virtual void SetHeader(const wxString& name, const wxString& value) override
+    {
+        [m_headers setValue:wxCFStringRef(value).AsNSString()
+                     forKey:wxCFStringRef(name).AsNSString()];
+    }
+
+    virtual void Finish(wxSharedPtr<wxWebViewHandlerResponseData> data) override
+    {
+        m_data = data;
+        wxInputStream* stream = data->GetStream();
+        size_t length = stream->GetLength();
+        NSHTTPURLResponse* response = [[NSHTTPURLResponse alloc] initWithURL:m_task.request.URL
+                                                                  statusCode:m_status
+                                                                 HTTPVersion:nil
+                                                                headerFields:m_headers];
+        [m_task didReceiveResponse:response];
+        [response release];
+
+        //Load the data, we malloc it so it is tidied up properly
+        void* buffer = malloc(length);
+        stream->Read(buffer, length);
+        NSData *taskData = [[NSData alloc] initWithBytesNoCopy:buffer length:length];
+        [m_task didReceiveData:taskData];
+        [taskData release];
+
+        [m_task didFinish];
+    }
+
+    virtual void FinishWithError() override
+    {
+        NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
+                            code:NSURLErrorFileDoesNotExist
+                            userInfo:nil];
+        [m_task didFailWithError:error];
+        [error release];
+    }
+
+    int m_status;
+    NSMutableDictionary* m_headers;
+    id<WKURLSchemeTask> m_task;
+    wxSharedPtr<wxWebViewHandlerResponseData> m_data;
+};
+
 @implementation WebViewCustomProtocol
 
 - (id)initWithHandler:(wxWebViewHandler *)handler
@@ -871,49 +1161,9 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
 - (void)webView:(WKWebView *)webView startURLSchemeTask:(id<WKURLSchemeTask>)urlSchemeTask
 WX_API_AVAILABLE_MACOS(10, 13)
 {
-    NSURLRequest *request = urlSchemeTask.request;
-    NSString* path = [[request URL] absoluteString];
-
-    wxString wxpath = wxCFStringRef::AsString(path);
-
-    wxFSFile* file = m_handler->GetFile(wxpath);
-
-    if (!file)
-    {
-        NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
-                            code:NSURLErrorFileDoesNotExist
-                            userInfo:nil];
-
-        [urlSchemeTask didFailWithError:error];
-
-        [error release];
-
-        return;
-    }
-
-    size_t length = file->GetStream()->GetLength();
-
-
-    NSURLResponse *response =  [[NSURLResponse alloc] initWithURL:[request URL]
-                               MIMEType:wxCFStringRef(file->GetMimeType()).AsNSString()
-                               expectedContentLength:length
-                               textEncodingName:nil];
-
-    //Load the data, we malloc it so it is tidied up properly
-    void* buffer = malloc(length);
-    file->GetStream()->Read(buffer, length);
-    NSData *data = [[NSData alloc] initWithBytesNoCopy:buffer length:length];
-
-    //Set the data
-    [urlSchemeTask didReceiveResponse:response];
-    [urlSchemeTask didReceiveData:data];
-
-    //Notify that we have finished
-    [urlSchemeTask didFinish];
-
-    [data release];
-
-    [response release];
+    wxWebViewWebKitHandlerRequest request(urlSchemeTask.request);
+    wxSharedPtr<wxWebViewHandlerResponse> response(new wxWebViewWebkitHandlerResponse(urlSchemeTask));
+    m_handler->StartRequest(request, response);
 }
 
 - (void)webView:(WKWebView *)webView stopURLSchemeTask:(id<WKURLSchemeTask>)urlSchemeTask
@@ -947,15 +1197,42 @@ WX_API_AVAILABLE_MACOS(10, 13)
         wxWEBVIEW_NAV_ACTION_USER :
         wxWEBVIEW_NAV_ACTION_OTHER;
 
-    wxWebViewEvent event(wxEVT_WEBVIEW_NEWWINDOW,
+
+    wxWebViewEvent newWinEvent(wxEVT_WEBVIEW_NEWWINDOW,
                          webKitWindow->GetId(),
                          wxCFStringRef::AsString( navigationAction.request.URL.absoluteString ),
                          "", navFlags);
 
     if (webKitWindow && webKitWindow->GetEventHandler())
-        webKitWindow->GetEventHandler()->ProcessEvent(event);
+        webKitWindow->GetEventHandler()->ProcessEvent(newWinEvent);
 
-    return nil;
+    if (newWinEvent.IsAllowed())
+    {
+        wxWebView* childWebView = new wxWebViewWebKit(wxWebViewConfiguration(wxWebViewBackendWebKit,
+            new wxWebViewConfigurationImplWebKit(configuration)), navigationAction.request);
+        wxWebViewWindowFeaturesWebKit childWindowFeatures(childWebView, configuration, navigationAction, windowFeatures);
+
+        wxWebViewEvent featuresEvent(wxEVT_WEBVIEW_NEWWINDOW_FEATURES,
+                         webKitWindow->GetId(),
+                         wxCFStringRef::AsString( navigationAction.request.URL.absoluteString ),
+                         "", navFlags);
+        featuresEvent.SetClientData(&childWindowFeatures);
+        if (webKitWindow && webKitWindow->GetEventHandler())
+            webKitWindow->GetEventHandler()->ProcessEvent(featuresEvent);
+
+        return (WKWebView*) childWebView->GetNativeBackend();
+    }
+    else
+        return nil;
+}
+
+- (void)webViewDidClose:(WKWebView *)webView
+{
+    wxWebViewEvent event(wxEVT_WEBVIEW_WINDOW_CLOSE_REQUESTED,
+                         webKitWindow->GetId(), "", "");
+
+    if (webKitWindow && webKitWindow->GetEventHandler())
+        webKitWindow->GetEventHandler()->ProcessEvent(event);
 }
 
 - (void)webView:(WKWebView *)webView runJavaScriptAlertPanelWithMessage:(NSString *)message
@@ -1026,25 +1303,6 @@ WX_API_AVAILABLE_MACOS(10, 12)
     webKitWindow->Print();
 }
 
-- (void)SendFullscreenChangedEvent:(int)status
-{
-    wxWebViewEvent event(wxEVT_WEBVIEW_FULLSCREEN_CHANGED, webKitWindow->GetId(),
-        webKitWindow->GetCurrentURL(), wxString());
-    event.SetEventObject(webKitWindow);
-    event.SetInt(status);
-    webKitWindow->HandleWindowEvent(event);
-}
-
-- (void)_webViewDidEnterFullscreen:(WKWebView *)webView
-{
-    [self SendFullscreenChangedEvent:1];
-}
-
-- (void)_webViewDidExitFullscreen:(WKWebView *)webView
-{
-    [self SendFullscreenChangedEvent:0];
-}
-
 @end
 
 @implementation WebViewScriptMessageHandler
@@ -1061,6 +1319,17 @@ WX_API_AVAILABLE_MACOS(10, 12)
 - (void)userContentController:(nonnull WKUserContentController *)userContentController
       didReceiveScriptMessage:(nonnull WKScriptMessage *)message
 {
+    // Handle internal fullscreen message independent of user message handlers
+    if ([message.name isEqualToString:@"__wxfullscreen"])
+    {
+        wxWebViewEvent event(wxEVT_WEBVIEW_FULLSCREEN_CHANGED, webKitWindow->GetId(),
+            webKitWindow->GetCurrentURL(), wxString());
+        event.SetEventObject(webKitWindow);
+        event.SetInt(((NSNumber*)message.body).intValue);
+        webKitWindow->HandleWindowEvent(event);
+        return;
+    }
+
     wxWebViewEvent event(wxEVT_WEBVIEW_SCRIPT_MESSAGE_RECEIVED,
                          webKitWindow->GetId(),
                          webKitWindow->GetCurrentURL(),

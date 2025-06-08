@@ -20,7 +20,7 @@
 */
 enum wxOperatingSystemId
 {
-    wxOS_UNKNOWN = 0,                 //!< returned on error
+    wxOS_UNKNOWN = 0,                 //!< Returned on error.
 
     wxOS_MAC_OS         = 1 << 0,     //!< Apple Mac OS 8/9/X with Mac paths
     wxOS_MAC_OSX_DARWIN = 1 << 1,     //!< Apple macOS with Unix paths
@@ -28,7 +28,7 @@ enum wxOperatingSystemId
     //! A combination of all @c wxOS_MAC_* values previously listed.
     wxOS_MAC = wxOS_MAC_OS|wxOS_MAC_OSX_DARWIN,
 
-    wxOS_WINDOWS_NT     = 1 << 3,     //!< Windows NT family (XP/Vista/7/8/10)
+    wxOS_WINDOWS_NT     = 1 << 3,     //!< Windows NT family (XP/Vista/7/8/10/11)
 
     //! Any Windows system, currently can be only wxOS_WINDOWS_NT.
     wxOS_WINDOWS = wxOS_WINDOWS_NT,
@@ -63,8 +63,8 @@ enum wxPortId
     wxPORT_BASE     = 1 << 0,       //!< wxBase, no native toolkit used
 
     wxPORT_MSW      = 1 << 1,       //!< wxMSW, native toolkit is Windows API
-    wxPORT_MOTIF    = 1 << 2,       //!< wxMotif, using [Open]Motif or Lesstif
-    wxPORT_GTK      = 1 << 3,       //!< wxGTK, using GTK+ 1.x, 2.x, 3.x, GPE
+    wxPORT_MOTIF    = 1 << 2,       //!< wxMotif, not supported any longer.
+    wxPORT_GTK      = 1 << 3,       //!< wxGTK, using GTK
     wxPORT_DFB      = 1 << 4,       //!< wxDFB, using wxUniversal
     wxPORT_X11      = 1 << 5,       //!< wxX11, using wxUniversal
     wxPORT_MAC      = 1 << 7,       //!< wxMac, using Carbon or Classic Mac API
@@ -270,6 +270,11 @@ public:
     /**
         Returns the global wxPlatformInfo object, initialized with the values
         for the currently running platform.
+
+        Note that this function is thread-safe, i.e. it can be called
+        concurrently from multiple threads without locking (unless wxWidgets
+        was compiled without threads support, i.e. with @c wxUSE_THREADS
+        changed to be 0).
     */
     static const wxPlatformInfo& Get();
 
@@ -278,7 +283,7 @@ public:
 
         These getters allow for easy string-to-enumeration-value conversion.
     */
-    //@{
+    ///@{
 
     /**
         Converts the given string to a wxBitness enum value or to
@@ -314,7 +319,7 @@ public:
     */
     static wxPortId GetPortId(const wxString& portname);
 
-    //@}
+    ///@}
 
 
     /**
@@ -322,7 +327,7 @@ public:
 
         These getters allow for easy enumeration-value-to-string conversion.
     */
-    //@{
+    ///@{
 
     /**
         @deprecated Use GetBitnessName() instead.
@@ -382,13 +387,13 @@ public:
     */
     static wxString GetOperatingSystemDirectory();
 
-    //@}
+    ///@}
 
 
     /**
         @name Getters
     */
-    //@{
+    ///@{
 
     /**
         @deprecated Use GetBitness() instead.
@@ -410,11 +415,20 @@ public:
     /**
         Returns the CPU architecture name, if available.
 
-        @see wxGetCpuArchitectureName()
+        @see wxGetCpuArchitectureName(), GetNativeCpuArchitectureName()
 
         @since 3.1.5
      */
     wxString GetCpuArchitectureName() const;
+
+    /**
+        Returns the native CPU architecture name, if available.
+
+        @since 3.1.6
+
+        @see ::wxGetNativeCpuArchitectureName(), GetCpuArchitectureName()
+     */
+    wxString GetNativeCpuArchitectureName() const;
 
     /**
         Returns the run-time major version of the OS associated with this
@@ -516,13 +530,13 @@ public:
     */
     int GetToolkitMicroVersion() const;
 
-    //@}
+    ///@}
 
 
     /**
         @name String-form getters
     */
-    //@{
+    ///@{
 
     /**
         @deprecated Use GetBitnessName() instead.
@@ -565,14 +579,14 @@ public:
     */
     wxString GetPortIdShortName() const;
 
-    //@}
+    ///@}
 
 
 
     /**
         @name Setters
     */
-    //@{
+    ///@{
 
     /**
         @deprecated Use SetBitness() instead.
@@ -627,5 +641,23 @@ public:
     */
     void SetLinuxDistributionInfo(const wxLinuxDistributionInfo& di);
 
-    //@}
+    ///@}
 };
+
+/**
+    Returns @true only for MSW programs running under Wine.
+
+    Return @true if the program is running under [Wine](https://www.winehq.org/)
+    and not a "native" MSW system.
+
+    @param ver If non-null and the program is executing under Wine, it is
+        filled with Wine version information (this output parameter is only
+        available in wxWidgets 3.3.0 and later).
+    @return @true if running under Wine, @false otherwise.
+
+    @since 3.1.6
+
+    @library{wxbase}
+    @category{cfg}
+*/
+bool wxIsRunningUnderWine(wxVersionInfo* ver = nullptr);

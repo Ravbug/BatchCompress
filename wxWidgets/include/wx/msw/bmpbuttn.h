@@ -2,7 +2,6 @@
 // Name:        wx/msw/bmpbuttn.h
 // Purpose:     wxBitmapButton class
 // Author:      Julian Smart
-// Modified by:
 // Created:     01/02/97
 // Copyright:   (c) Julian Smart
 // Licence:     wxWindows licence
@@ -18,11 +17,11 @@
 class WXDLLIMPEXP_CORE wxBitmapButton : public wxBitmapButtonBase
 {
 public:
-    wxBitmapButton() {}
+    wxBitmapButton() = default;
 
     wxBitmapButton(wxWindow *parent,
                    wxWindowID id,
-                   const wxBitmap& bitmap,
+                   const wxBitmapBundle& bitmap,
                    const wxPoint& pos = wxDefaultPosition,
                    const wxSize& size = wxDefaultSize,
                    long style = 0,
@@ -34,7 +33,7 @@ public:
 
     bool Create(wxWindow *parent,
                 wxWindowID id,
-                const wxBitmap& bitmap,
+                const wxBitmapBundle& bitmap,
                 const wxPoint& pos = wxDefaultPosition,
                 const wxSize& size = wxDefaultSize,
                 long style = 0,
@@ -45,7 +44,6 @@ public:
                            wxWindowID winid,
                            const wxString& name = wxString());
 protected:
-    wxDECLARE_EVENT_TABLE();
     wxDECLARE_DYNAMIC_CLASS_NO_COPY(wxBitmapButton);
 };
 

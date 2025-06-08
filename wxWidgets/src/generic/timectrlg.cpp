@@ -27,6 +27,7 @@
 #endif // WX_PRECOMP
 
 #include "wx/timectrl.h"
+#include "wx/uilocale.h"
 
 // This class is only compiled if there is no native version or if we
 // explicitly want to use both the native and generic one (this is useful for
@@ -85,7 +86,7 @@ public:
         // instead of zeros) too as this is the most common unsupported case in
         // practice.
 #if wxUSE_INTL
-        m_useAMPM = wxLocale::GetInfo(wxLOCALE_TIME_FMT).Contains("%p");
+        m_useAMPM = wxUILocale::GetCurrent().GetInfo(wxLOCALE_TIME_FMT).Contains("%p");
 #else
         m_useAMPM = false;
 #endif
@@ -127,7 +128,6 @@ public:
     // The current time (date part is ignored).
     wxDateTime m_time;
 
-private:
     // The logical fields of the text control (AM/PM one may not be present).
     enum Field
     {
@@ -578,7 +578,7 @@ private:
 
 void wxTimePickerCtrlGeneric::Init()
 {
-    m_impl = NULL;
+    m_impl = nullptr;
 }
 
 bool
@@ -667,7 +667,7 @@ wxSize wxTimePickerCtrlGeneric::DoGetBestSize() const
 
     wxTextCtrl* const text = m_impl->m_text;
     int w;
-    text->GetTextExtent(text->GetValue(), &w, NULL);
+    text->GetTextExtent(m_impl->m_useAMPM ? "00:00:00 AM" : "00:00:00", &w, nullptr);
     wxSize size(text->GetSizeFromTextSize(w + 1));
 
     const wxSize sizeBtn(m_impl->m_btn->GetBestSize());
