@@ -55,7 +55,7 @@ wxBitmap wxScreenDCImpl::DoGetAsBitmap(const wxRect *subrect) const
 
     wxBitmap bmp(rect.GetSize(), 32);
 
-#if !wxOSX_USE_IPHONE
+#if 0
     CGRect srcRect = CGRectMake(rect.x, rect.y, rect.width, rect.height);
 
     CGContextRef context = (CGContextRef)bmp.GetHBITMAP();
